@@ -1,0 +1,49 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.class
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+
+# IDE and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data files (raw and staging data not tracked in Git)
+data/raw/*
+!data/raw/.gitkeep
+data/staging/*
+!data/staging/.gitkeep
+
+# Credentials and secrets
+*credentials*.json
+*service_account*.json
+*.key
+*.pem
+.env
+.env.*
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+target/
+logs/
+
+# Power BI
+*.tmp
+*.pbit.bak
+*.pbix.bak
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.BIN/
+.DS_Store
