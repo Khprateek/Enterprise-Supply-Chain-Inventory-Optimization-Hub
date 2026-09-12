@@ -33,6 +33,13 @@ def generate_procurement(config: ScaleConfig, dimensions: dict, rng: np.random.G
     pair_whs = rng.choice(wh_keys, size=num_pairs, replace=True)
     active_pairs = list(set(zip(pair_skus, pair_whs)))
     
+    # Identify ~8% of C-tier pairs as phased-out/dormant to simulate slow-moving/dead stock
+    curr_prods_c = set(curr_prods[curr_prods["ABCClassification"] == "C"]["ProductSKU"].values)
+    c_pairs = [p for p in active_pairs if p[0] in curr_prods_c]
+    num_dormant = max(10, int(len(c_pairs) * 0.08)) if len(c_pairs) > 0 else 0
+    dormant_indices = rng.choice(len(c_pairs), size=num_dormant, replace=False) if num_dormant > 0 else []
+    dormant_pairs = set(c_pairs[idx] for idx in dormant_indices)
+    
     total_days = (config.end_date - config.start_date).days + 1
     
     po_records = []
@@ -46,12 +53,15 @@ def generate_procurement(config: ScaleConfig, dimensions: dict, rng: np.random.G
         unit_cost = cost_map[sku]
         contract_lt = supp_lead_time_map[supp_key]
         tier = supp_tier_map[supp_key]
+        is_dormant = (sku, wh_key) in dormant_pairs
         
         # Scheduling interval based on frequency
         interval = rng.integers(max(3, config.po_frequency_days - 2), config.po_frequency_days + 4)
         curr_offset = rng.integers(0, interval)
         
         while curr_offset < total_days:
+            if is_dormant and curr_offset > 100:
+                break # Discontinue replenishment for obsolete tail items
             po_date = config.start_date + timedelta(days=int(curr_offset))
             if po_date > config.end_date:
                 break
@@ -135,4 +145,4 @@ def generate_procurement(config: ScaleConfig, dimensions: dict, rng: np.random.G
             
     df_po = pd.DataFrame(po_records)
     print(f"Generated {len(df_po):,} purchase order lines.")
-    return df_po, active_pairs
+    return df_po, active_pairs, dormant_pairs
