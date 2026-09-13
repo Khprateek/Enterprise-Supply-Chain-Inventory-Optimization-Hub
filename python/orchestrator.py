@@ -38,28 +38,28 @@ def run_pipeline(scale_name: str = "dev", output_dir: str = "data/raw", format_t
     
     # 2. Procurement (FactPurchaseOrder)
     t0 = time.time()
-    df_po, active_pairs = generate_procurement(config, dims, rng)
+    df_po, active_pairs, dormant_pairs = generate_procurement(config, dims, rng)
     print(f"  Procurement generated in {time.time() - t0:.2f}s")
     
-    # 3. Sales (FactSales)
+    # 3. Sales (FactSales with multi-line orders and SCD2 resolution)
     t0 = time.time()
-    df_sales = generate_sales(config, dims, active_pairs, rng)
+    df_sales = generate_sales(config, dims, active_pairs, rng, dormant_pairs=dormant_pairs)
     print(f"  Sales generated in {time.time() - t0:.2f}s")
     
-    # 4. Inventory (FactInventorySnapshot)
-    t0 = time.time()
-    df_inventory = generate_inventory(config, dims, df_sales, df_po, active_pairs, rng)
-    print(f"  Inventory snapshots generated in {time.time() - t0:.2f}s")
-    
-    # 5. Forecast (FactDemandForecast)
-    t0 = time.time()
-    df_forecast = generate_forecast(config, dims, df_sales, active_pairs, rng)
-    print(f"  Forecast generated in {time.time() - t0:.2f}s")
-    
-    # 6. Movements (FactInventoryMovement)
+    # 4. Movements (FactInventoryMovement)
     t0 = time.time()
     df_movements = generate_movements(config, dims, active_pairs, rng)
     print(f"  Movements generated in {time.time() - t0:.2f}s")
+    
+    # 5. Inventory (FactInventorySnapshot - reconciled with sales, PO receipts, and movements)
+    t0 = time.time()
+    df_inventory = generate_inventory(config, dims, df_sales, df_po, active_pairs, rng, df_movements=df_movements)
+    print(f"  Inventory snapshots generated in {time.time() - t0:.2f}s")
+    
+    # 6. Forecast (FactDemandForecast)
+    t0 = time.time()
+    df_forecast = generate_forecast(config, dims, df_sales, active_pairs, rng)
+    print(f"  Forecast generated in {time.time() - t0:.2f}s")
     
     # 7. Stockouts (FactStockout)
     t0 = time.time()
