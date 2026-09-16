@@ -1,0 +1,27 @@
+/* ==============================================================================
+   SUPPLIER PERFORMANCE MEASURES
+   Display Folder: Supplier
+   ============================================================================== */
+
+/// Total active direct suppliers evaluated
+[Active Supplier Count] = 
+DISTINCTCOUNT(FactSupplierMonthlyPerformance[SupplierKey])
+
+/// Average monthly OTIF performance across suppliers from pre-aggregated scorecard mart
+[Supplier Monthly OTIF Avg Pct] = 
+AVERAGE(FactSupplierMonthlyPerformance[OTIFRatePct])
+
+/// Average supplier delivery lead time from scorecard mart
+[Scorecard Average Lead Time Days] = 
+AVERAGE(FactSupplierMonthlyPerformance[AverageLeadTimeDays])
+
+/// Count of supplier-month records in Critical SLA Breach status
+[Critical SLA Breach Count] = 
+CALCULATE(
+    COUNTROWS(FactSupplierMonthlyPerformance),
+    FactSupplierMonthlyPerformance[SupplierMonthlyRiskRating] = "Critical SLA Breach"
+)
+
+/// Percentage of vendor monthly reviews flagged with critical SLA breaches
+[Critical SLA Breach Pct] = 
+DIVIDE([Critical SLA Breach Count], COUNTROWS(FactSupplierMonthlyPerformance), 0)

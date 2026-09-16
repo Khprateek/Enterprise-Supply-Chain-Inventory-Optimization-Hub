@@ -1,0 +1,80 @@
+/* ==============================================================================
+   PROCUREMENT & REPLENISHMENT MEASURES
+   Display Folder: Procurement
+   ============================================================================== */
+
+/// Total procurement spend committed across purchase order lines
+[Total Procurement Spend] = 
+SUM(FactPurchaseOrder[ExtendedPOAmount])
+
+/// Total units ordered on vendor purchase orders
+[Total PO Ordered Quantity] = 
+SUM(FactPurchaseOrder[OrderedQuantity])
+
+/// Total units received at warehouse receiving docks
+[Total PO Received Quantity] = 
+SUM(FactPurchaseOrder[ReceivedQuantity])
+
+/// Total units rejected during inbound QA inspection
+[Total PO Rejected Quantity] = 
+SUM(FactPurchaseOrder[RejectedQuantity])
+
+/// Total distinct purchase orders issued
+[Total Purchase Order Count] = 
+DISTINCTCOUNT(FactPurchaseOrder[PurchaseOrderID])
+
+/// Total purchase order line items
+[Total PO Line Count] = 
+COUNTROWS(FactPurchaseOrder)
+
+/// Completed purchase order lines
+[Completed PO Line Count] = 
+CALCULATE(COUNTROWS(FactPurchaseOrder), FactPurchaseOrder[POStatus] = "Completed")
+
+/// Open purchase order lines currently in transit or awaiting delivery
+[Open In-Transit PO Line Count] = 
+CALCULATE(COUNTROWS(FactPurchaseOrder), FactPurchaseOrder[POStatus] = "Open In-Transit")
+
+/// Overdue purchase order lines past promised delivery date
+[Overdue PO Line Count] = 
+CALCULATE(COUNTROWS(FactPurchaseOrder), FactPurchaseOrder[POStatus] = "Overdue")
+
+/// Average quoted contract lead time in days
+[Average Contract Lead Time Days] = 
+AVERAGE(FactPurchaseOrder[PromisedLeadTimeDays])
+
+/// Average actual dock delivery lead time in days
+[Average Actual Lead Time Days] = 
+AVERAGE(FactPurchaseOrder[ActualLeadTimeDays])
+
+/// Average lead time variance (Actual - Promised; positive = late)
+[Average Lead Time Variance Days] = 
+AVERAGE(FactPurchaseOrder[LeadTimeVarianceDays])
+
+/// Purchase order lines delivered on or before promised date
+[PO Delivered On-Time Count] = 
+CALCULATE(COUNTROWS(FactPurchaseOrder), FactPurchaseOrder[IsDeliveredOnTimeFlag] = 1)
+
+/// Purchase order lines where received qty matches or exceeds ordered qty
+[PO Delivered In-Full Count] = 
+CALCULATE(COUNTROWS(FactPurchaseOrder), FactPurchaseOrder[IsDeliveredInFullFlag] = 1)
+
+/// Purchase order lines achieving both on-time delivery and 100% quantity fill
+[PO OTIF Line Count] = 
+CALCULATE(COUNTROWS(FactPurchaseOrder), FactPurchaseOrder[IsSupplierOTIFFlag] = 1)
+
+/// Overall procurement On-Time In-Full (OTIF) compliance percentage
+[Procurement OTIF Rate Pct] = 
+DIVIDE([PO OTIF Line Count], [Completed PO Line Count], 0)
+
+/// Overall procurement on-time rate percentage
+[Procurement On-Time Rate Pct] = 
+DIVIDE([PO Delivered On-Time Count], [Completed PO Line Count], 0)
+
+/// Overall procurement line fill rate percentage
+[Procurement In-Full Rate Pct] = 
+DIVIDE([PO Delivered In-Full Count], [Completed PO Line Count], 0)
+
+/// Inbound defect rate percentage (Rejected Units / Received Units)
+[Inbound Defect Rate Pct] = 
+DIVIDE([Total PO Rejected Quantity], [Total PO Received Quantity], 0)

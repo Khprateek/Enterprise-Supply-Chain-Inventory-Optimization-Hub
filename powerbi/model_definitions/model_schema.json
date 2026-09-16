@@ -1,0 +1,9 @@
+{
+  "model_name": "Enterprise Supply Chain Semantic Model",
+  "storage_mode": "Import Mode (VertiPaq)",
+  "date_table": "DimDate",
+  "tables_count": 17,
+  "relationships_count": 36,
+  "active_relationships": 28,
+  "inactive_relationships": 8
+}

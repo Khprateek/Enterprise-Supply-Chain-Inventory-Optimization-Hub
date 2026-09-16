@@ -1,0 +1,75 @@
+/* ==============================================================================
+   INVENTORY MEASURES
+   Display Folder: Inventory
+   ============================================================================== */
+
+/// Total on-hand units for the selected period (semi-additive: evaluated on the last available date)
+[Current On Hand Quantity] = 
+CALCULATE(
+    SUM(FactInventorySnapshot[OnHandQuantity]),
+    LASTNONBLANK(DimDate[FullDate], CALCULATE(COUNTROWS(FactInventorySnapshot)))
+)
+
+/// Total available units for sale (OnHand - Reserved) evaluated on the last available date
+[Current Available Quantity] = 
+CALCULATE(
+    SUM(FactInventorySnapshot[AvailableQuantity]),
+    LASTNONBLANK(DimDate[FullDate], CALCULATE(COUNTROWS(FactInventorySnapshot)))
+)
+
+/// Total reserved units committed to sales orders evaluated on the last available date
+[Current Reserved Quantity] = 
+CALCULATE(
+    SUM(FactInventorySnapshot[ReservedQuantity]),
+    LASTNONBLANK(DimDate[FullDate], CALCULATE(COUNTROWS(FactInventorySnapshot)))
+)
+
+/// Pipeline inbound units on open replenishment POs evaluated on the last available date
+[Current Inbound Pipeline Quantity] = 
+CALCULATE(
+    SUM(FactInventorySnapshot[InTransitInboundQuantity]),
+    LASTNONBLANK(DimDate[FullDate], CALCULATE(COUNTROWS(FactInventorySnapshot)))
+)
+
+/// Total dollar valuation of inventory (OnHand * UnitLandedCost) evaluated on the last available date
+[Current Inventory Valuation] = 
+CALCULATE(
+    SUM(FactInventorySnapshot[InventoryValuation]),
+    LASTNONBLANK(DimDate[FullDate], CALCULATE(COUNTROWS(FactInventorySnapshot)))
+)
+
+/// Average daily inventory units across the selected date range
+[Average Daily Inventory Units] = 
+AVERAGEX(
+    VALUES(DimDate[FullDate]),
+    CALCULATE(SUM(FactInventorySnapshot[OnHandQuantity]))
+)
+
+/// Average daily inventory valuation across the selected date range
+[Average Daily Inventory Valuation] = 
+AVERAGEX(
+    VALUES(DimDate[FullDate]),
+    CALCULATE(SUM(FactInventorySnapshot[InventoryValuation]))
+)
+
+/// Total valuation of dead stock (items with no movement in >= 180 days)
+[Dead Stock Valuation] = 
+CALCULATE(
+    SUM(FactInventorySnapshot[InventoryValuation]),
+    FactInventorySnapshot[IsDeadStockFlag] = 1,
+    LASTNONBLANK(DimDate[FullDate], CALCULATE(COUNTROWS(FactInventorySnapshot)))
+)
+
+/// Ratio of dead stock valuation to total inventory valuation
+[Dead Stock Valuation Pct] = 
+DIVIDE([Dead Stock Valuation], [Current Inventory Valuation], 0)
+
+/// Days of Inventory Outstanding (DIO = Average Inventory / Daily COGS)
+[Days of Inventory Outstanding (DIO)] = 
+VAR DailyCOGS = DIVIDE([Total Cost of Goods Sold], COUNTROWS(VALUES(DimDate[FullDate])), 0)
+RETURN
+    DIVIDE([Average Daily Inventory Valuation], DailyCOGS, 0)
+
+/// Annualized Inventory Turns = Total Annual COGS / Average Daily Inventory Valuation
+[Inventory Turnover Ratio] = 
+DIVIDE([Total Cost of Goods Sold], [Average Daily Inventory Valuation], 0)

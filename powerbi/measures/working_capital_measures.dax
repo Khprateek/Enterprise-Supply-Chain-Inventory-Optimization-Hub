@@ -1,0 +1,20 @@
+/* ==============================================================================
+   WORKING CAPITAL & CARRYING COST MEASURES
+   Display Folder: Working Capital
+   ============================================================================== */
+
+/// Selected annual inventory holding cost rate (default 22%)
+[Annual Carrying Cost Rate] = 
+SELECTEDVALUE(DimScenario[AnnualCarryingCostRatePct], 22.0) / 100.0
+
+/// Total annual inventory carrying cost = Average Daily Valuation * Carrying Cost Rate
+[Annual Inventory Carrying Cost] = 
+[Average Daily Inventory Valuation] * [Annual Carrying Cost Rate]
+
+/// Total capital tied up in inventory (Current Inventory Valuation)
+[Total Working Capital In Inventory] = 
+[Current Inventory Valuation]
+
+/// Potential capital release achievable by eliminating dead stock
+[Potential Working Capital Release] = 
+[Dead Stock Valuation]

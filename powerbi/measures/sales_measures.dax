@@ -1,0 +1,56 @@
+/* ==============================================================================
+   SALES MEASURES
+   Display Folder: Sales
+   ============================================================================== */
+
+/// Total units ordered by customers
+[Total Ordered Quantity] = 
+SUM(FactSales[OrderedQuantity])
+
+/// Total units successfully shipped to customers
+[Total Shipped Quantity] = 
+SUM(FactSales[ShippedQuantity])
+
+/// Total units cancelled prior to fulfillment
+[Total Cancelled Quantity] = 
+SUM(FactSales[CancelledQuantity])
+
+/// Gross revenue before discounts
+[Total Gross Sales Revenue] = 
+SUM(FactSales[GrossSalesAmount])
+
+/// Total promotional and contract discounts applied
+[Total Discount Amount] = 
+SUM(FactSales[DiscountAmount])
+
+/// Net revenue realized after discounts
+[Total Net Sales Revenue] = 
+SUM(FactSales[NetSalesAmount])
+
+/// Total cost of goods sold for fulfilled sales orders
+[Total Cost of Goods Sold] = 
+SUM(FactSales[CostOfGoodsSold])
+
+/// Gross profit realized (Net Sales - COGS)
+[Gross Profit Amount] = 
+[Total Net Sales Revenue] - [Total Cost of Goods Sold]
+
+/// Gross profit margin percentage
+[Gross Profit Margin Pct] = 
+DIVIDE([Gross Profit Amount], [Total Net Sales Revenue], 0)
+
+/// Average discount percentage granted across transactions
+[Average Discount Pct] = 
+DIVIDE([Total Discount Amount], [Total Gross Sales Revenue], 0)
+
+/// Total distinct customer sales orders processed
+[Total Sales Order Count] = 
+DISTINCTCOUNT(FactSales[SalesOrderID])
+
+/// Total sales order line items
+[Total Sales Line Count] = 
+COUNTROWS(FactSales)
+
+/// Average order cycle time in days from order placement to customer delivery
+[Average Order Cycle Time Days] = 
+AVERAGE(FactSales[OrderLineCycleTimeDays])

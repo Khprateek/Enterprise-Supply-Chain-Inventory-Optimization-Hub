@@ -1,0 +1,61 @@
+/* ==============================================================================
+   SIMULATION & REPLENISHMENT WHAT-IF MEASURES
+   Display Folder: Simulation
+   ============================================================================== */
+
+/// Demand multiplier from selected what-if scenario parameter
+[Scenario Demand Multiplier] = 
+SELECTEDVALUE(DimScenario[DemandMultiplier], 1.00)
+
+/// Lead time shock buffer days from selected what-if scenario parameter
+[Scenario Lead Time Shock Days] = 
+SELECTEDVALUE(DimScenario[LeadTimeShockDays], 0)
+
+/// Simulated demand units under what-if scenario conditions
+[Simulated Demand Quantity] = 
+[Total Ordered Quantity] * [Scenario Demand Multiplier]
+
+/// Dynamic Recommended Safety Stock using King's formula:
+/// SafetyStock = Z * SQRT(LT * Var(Demand) + Demand^2 * Var(LT))
+[Simulated Dynamic Safety Stock Units] = 
+VAR TargetSL = SELECTEDVALUE(DimScenario[ServiceLevelTargetPct], 95.0)
+VAR Z = 
+    SWITCH(
+        TRUE(),
+        TargetSL >= 99.0, 2.33,
+        TargetSL >= 98.0, 2.05,
+        TargetSL >= 95.0, 1.65,
+        TargetSL >= 90.0, 1.28,
+        1.65
+    )
+VAR AvgDailyDemand = DIVIDE([Total Ordered Quantity], COUNTROWS(VALUES(DimDate[FullDate])), 0) * [Scenario Demand Multiplier]
+// Dynamic sample standard deviation of daily demand across active dates
+VAR DailyDemandTable = 
+    ADDCOLUMNS(
+        VALUES(DimDate[FullDate]),
+        "@DailyDemand", CALCULATE([Total Ordered Quantity]) * [Scenario Demand Multiplier]
+    )
+VAR DynamicStdDailyDemand = 
+    COALESCE(
+        STDEVX.S(DailyDemandTable, [@DailyDemand]),
+        AvgDailyDemand * 0.25
+    )
+VAR EffectiveLT = [Average Actual Lead Time Days] + [Scenario Lead Time Shock Days]
+// Dynamic sample standard deviation of supplier delivery lead times
+VAR DynamicStdLT = 
+    COALESCE(
+        CALCULATE(STDEV.S(FactPurchaseOrder[ActualLeadTimeDays])),
+        CALCULATE(STDEV.S(FactPurchaseOrder[PromisedLeadTimeDays])),
+        2.0
+    )
+VAR VarianceComp = (EffectiveLT * (DynamicStdDailyDemand ^ 2)) + ((AvgDailyDemand ^ 2) * (DynamicStdLT ^ 2))
+RETURN
+    ROUND(Z * SQRT(MAX(1.0, VarianceComp)), 0)
+
+/// Dynamic Reorder Point (ROP = Demand During Lead Time + Safety Stock)
+[Simulated Reorder Point Units] = 
+VAR AvgDailyDemand = DIVIDE([Total Ordered Quantity], COUNTROWS(VALUES(DimDate[FullDate])), 0) * [Scenario Demand Multiplier]
+VAR EffectiveLT = [Average Actual Lead Time Days] + [Scenario Lead Time Shock Days]
+VAR DemandDuringLeadTime = AvgDailyDemand * EffectiveLT
+RETURN
+    ROUND(DemandDuringLeadTime + [Simulated Dynamic Safety Stock Units], 0)

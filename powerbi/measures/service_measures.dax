@@ -1,0 +1,64 @@
+/* ==============================================================================
+   SERVICE LEVEL & STOCKOUT MEASURES
+   Display Folder: Service
+   ============================================================================== */
+
+/// Sales order line items delivered strictly on-time and in-full
+[Sales OTIF Line Count] = 
+CALCULATE(
+    COUNTROWS(FactSales),
+    FactSales[OnTimeInFullFlag] = 1
+)
+
+/// Outbound customer line-level OTIF rate
+[Customer Line OTIF Rate Pct] = 
+DIVIDE([Sales OTIF Line Count], [Total Sales Line Count], 0)
+
+/// Alias for backwards compatibility
+[Customer OTIF Rate Pct] = [Customer Line OTIF Rate Pct]
+
+/// Distinct sales orders placed
+[Total Distinct Sales Order Count] = 
+DISTINCTCOUNT(FactSales[SalesOrderID])
+
+/// Sales orders delivered strictly on-time and in-full across ALL order lines
+[Sales OTIF Order Count] = 
+VAR OrderSummary = 
+    SUMMARIZE(
+        FactSales,
+        FactSales[SalesOrderID],
+        "@IsOrderOTIF", IF(MIN(FactSales[OnTimeInFullFlag]) = 1, 1, 0)
+    )
+RETURN
+    SUMX(OrderSummary, [@IsOrderOTIF])
+
+/// Order-Level OTIF Rate (Order is OTIF if and only if all constituent lines are delivered OTIF)
+[Customer Order OTIF Rate Pct] = 
+DIVIDE([Sales OTIF Order Count], [Total Distinct Sales Order Count], 0)
+
+/// Unit fill rate percentage (Shipped Units / Ordered Units)
+[Unit Fill Rate Pct] = 
+DIVIDE([Total Shipped Quantity], [Total Ordered Quantity], 0)
+
+/// Total count of consolidated stockout outage episodes
+[Stockout Incident Count] = 
+COUNTROWS(FactStockout)
+
+/// Total duration in days across all stockout events
+[Total Stockout Days] = 
+SUM(FactStockout[StockoutDurationDays])
+
+/// Total unfulfilled demand units attributed to stockout events
+[Estimated Lost Demand Units] = 
+SUM(FactStockout[EstimatedLostDemandUnits])
+
+/// Total estimated lost revenue due to stockouts
+[Estimated Lost Sales Revenue] = 
+SUM(FactStockout[EstimatedLostRevenueAmount])
+
+/// Daily stockout rate (% of SKU-Warehouse combinations with zero available stock)
+[Daily Stockout Rate Pct] = 
+VAR TotalCombos = COUNTROWS(FactInventorySnapshot)
+VAR StockoutCombos = CALCULATE(COUNTROWS(FactInventorySnapshot), FactInventorySnapshot[IsStockoutFlag] = 1)
+RETURN
+    DIVIDE(StockoutCombos, TotalCombos, 0)

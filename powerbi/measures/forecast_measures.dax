@@ -1,0 +1,47 @@
+/* ==============================================================================
+   FORECAST PERFORMANCE MEASURES
+   Display Folder: Forecast
+   ============================================================================== */
+
+/// Consensus forecasted demand units
+[Total Forecasted Quantity] = 
+SUM(FactDemandForecast[ForecastedQuantity])
+
+/// Algorithmic baseline statistical projection
+[Baseline Statistical Quantity] = 
+SUM(FactDemandForecast[BaselineStatisticalQuantity])
+
+/// Total manual adjustments applied by planners
+[Planner Adjustment Quantity] = 
+SUM(FactDemandForecast[PlannerAdjustmentQuantity])
+
+/// Total forecasted demand value
+[Total Forecast Value] = 
+SUM(FactDemandForecast[ForecastValue])
+
+/// Absolute forecast error units = ABS(Actual Sold - Forecasted) evaluated at the monthly forecast cycle grain
+[Absolute Forecast Error Units] = 
+SUMX(
+    SUMMARIZE(
+        FactDemandForecast,
+        DimDate[MonthYear],
+        DimProduct[ProductKey],
+        DimWarehouse[WarehouseKey],
+        "ActualQty", [Total Ordered Quantity],
+        "FcstQty", [Total Forecasted Quantity]
+    ),
+    ABS([ActualQty] - [FcstQty])
+)
+
+/// Weighted Absolute Percentage Error (WAPE = Sum(|Actual - Forecast|) / Sum(Actual))
+[Forecast WAPE Pct] = 
+DIVIDE([Absolute Forecast Error Units], [Total Ordered Quantity], 0)
+
+/// Forecast accuracy percentage (1 - WAPE)
+[Forecast Accuracy Pct] = 
+MAX(0, 1 - [Forecast WAPE Pct])
+
+/// Forecast bias percentage = (Sum(Forecast) - Sum(Actual)) / Sum(Actual)
+/// Positive indicates systemic over-forecasting, negative indicates under-forecasting
+[Forecast Bias Pct] = 
+DIVIDE([Total Forecasted Quantity] - [Total Ordered Quantity], [Total Ordered Quantity], 0)
