@@ -1,0 +1,51 @@
+/* ==============================================================================
+   WAREHOUSE & FACILITY MEASURES
+   Display Folder: Warehouse
+   Table in PBI: DimWarehouse
+   Source of truth: Synced from Power BI via Tabular Editor export — 2026-09-17
+   ============================================================================== */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 1: FACILITY COUNTS & CAPACITY
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Count of distinct active warehouses / distribution centers in filter context
+[Facility Count] =
+DISTINCTCOUNT(DimWarehouse[WarehouseKey])
+
+/// Total pallet storage capacity across all facilities in filter context
+/// Source column: DimWarehouse[StorageCapacityPallets]
+/// Used as the denominator in [Storage Utilization Pct]
+[Total Storage Capacity Pallets] =
+SUM(DimWarehouse[StorageCapacityPallets])
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 2: WAREHOUSE HEALTH STATUS
+// Health is evaluated per facility (requires warehouse filter context to be meaningful).
+// Thresholds:
+//   Severe Excess  : DIO > 730 days OR Utilization > 90% (overloaded AND stale stock)
+//   Depletion Risk : DIO < 30 days OR Utilization < 35% (understocked)
+//   Balanced       : All other
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Warehouse health classification based on DIO and storage utilization
+[Warehouse Health Status] =
+VAR FacilityDIO  = [Days of Inventory Outstanding (DIO)]
+VAR Utilization  = [Storage Utilization Pct]
+RETURN
+SWITCH(
+    TRUE(),
+    FacilityDIO > 730 || Utilization > 0.90, "Severe Excess",
+    FacilityDIO < 30  || Utilization < 0.35, "Depletion Risk",
+    "Balanced"
+)
+
+/// Hex color for the Warehouse Health Status badge
+[Warehouse Health Status Color] =
+SWITCH(
+    [Warehouse Health Status],
+    "Severe Excess",  "#f59e0b",   -- Amber
+    "Depletion Risk", "#f43f5e",   -- Rose Red
+    "Balanced",       "#10b981",   -- Emerald Green
+    "#94a3b8"                       -- Slate (unknown / no data)
+)

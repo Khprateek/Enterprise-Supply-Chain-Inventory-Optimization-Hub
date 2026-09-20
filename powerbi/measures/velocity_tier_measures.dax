@@ -1,0 +1,110 @@
+/* ==============================================================================
+   INVENTORY VELOCITY TIER MEASURES
+   Display Folder: Inventory\Velocity Tiers
+   Table in PBI: SummaryInventoryVelocity (calculated/imported summary table)
+   Source of truth: Synced from Power BI via Tabular Editor export — 2026-09-17
+
+   SummaryInventoryVelocity is a pre-aggregated summary table (likely a Power Query
+   calculated table or BigQuery view) that classifies all SKUs into 5 velocity tiers
+   based on Days of Supply / turnover speed.
+
+   Tier structure (by TierOrder):
+     1 = Severe Excess       (DIO > 365d, High working capital lockup)
+     2 = Surplus / Slow      (DIO 180–365d, Slow replenishment)
+     3 = Buffer / Seasonal   (DIO 60–180d, Balanced seasonal safety stock)
+     4 = Optimal / Fast      (DIO 14–60d, High velocity FMCG flow)
+     5 = Depletion Risk      (DIO < 14d, Immediate PO required)
+
+   Key columns expected in SummaryInventoryVelocity:
+     TierOrder           INT    (1–5, sort key)
+     InventoryValuation  NUMERIC (capital locked in this tier)
+     ProductSKU          STRING  (for SKU count)
+   ============================================================================== */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 1: TIER CAPITAL (INVENTORY VALUATION PER TIER)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Total inventory valuation in Tier 1 — Severe Excess (DIO > 365d)
+[Tier 1 Severe Excess Capital] =
+CALCULATE(
+    SUM(SummaryInventoryVelocity[InventoryValuation]),
+    SummaryInventoryVelocity[TierOrder] = 1
+)
+
+/// Total inventory valuation in Tier 2 — Surplus / Slow-Moving (DIO 180–365d)
+[Tier 2 Surplus Capital] =
+CALCULATE(
+    SUM(SummaryInventoryVelocity[InventoryValuation]),
+    SummaryInventoryVelocity[TierOrder] = 2
+)
+
+/// Total inventory valuation in Tier 3 — Buffer / Seasonal (DIO 60–180d)
+[Tier 3 Buffer Capital] =
+CALCULATE(
+    SUM(SummaryInventoryVelocity[InventoryValuation]),
+    SummaryInventoryVelocity[TierOrder] = 3
+)
+
+/// Total inventory valuation in Tier 4 — Optimal / Fast-Moving (DIO 14–60d)
+[Tier 4 Optimal Capital] =
+CALCULATE(
+    SUM(SummaryInventoryVelocity[InventoryValuation]),
+    SummaryInventoryVelocity[TierOrder] = 4
+)
+
+/// Total inventory valuation in Tier 5 — Depletion Risk (DIO < 14d)
+[Tier 5 Risk Capital] =
+CALCULATE(
+    SUM(SummaryInventoryVelocity[InventoryValuation]),
+    SummaryInventoryVelocity[TierOrder] = 5
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 2: TIER SKU COUNTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Number of SKUs in Tier 1 — Severe Excess
+[Tier 1 SKU Count] =
+CALCULATE(COUNTROWS(SummaryInventoryVelocity), SummaryInventoryVelocity[TierOrder] = 1)
+
+/// Number of SKUs in Tier 2 — Surplus / Slow-Moving
+[Tier 2 SKU Count] =
+CALCULATE(COUNTROWS(SummaryInventoryVelocity), SummaryInventoryVelocity[TierOrder] = 2)
+
+/// Number of SKUs in Tier 3 — Buffer / Seasonal
+[Tier 3 SKU Count] =
+CALCULATE(COUNTROWS(SummaryInventoryVelocity), SummaryInventoryVelocity[TierOrder] = 3)
+
+/// Number of SKUs in Tier 4 — Optimal / Fast-Moving
+[Tier 4 SKU Count] =
+CALCULATE(COUNTROWS(SummaryInventoryVelocity), SummaryInventoryVelocity[TierOrder] = 4)
+
+/// Number of SKUs in Tier 5 — Depletion Risk
+[Tier 5 SKU Count] =
+CALCULATE(COUNTROWS(SummaryInventoryVelocity), SummaryInventoryVelocity[TierOrder] = 5)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 3: TIER SUBTITLE DISPLAY STRINGS
+// Used as reference labels on the velocity tier card visuals
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Subtitle for Tier 1 card: "N SKUs • High Working Capital Lockup"
+[Tier 1 SKU Subtitle] =
+FORMAT([Tier 1 SKU Count], "#,##0") & " SKUs • High Working Capital Lockup"
+
+/// Subtitle for Tier 2 card: "N SKUs • Slow Moving Replenishment"
+[Tier 2 SKU Subtitle] =
+FORMAT([Tier 2 SKU Count], "#,##0") & " SKUs • Slow Moving Replenishment"
+
+/// Subtitle for Tier 3 card: "N SKUs • Balanced Seasonal Safety Stock"
+[Tier 3 SKU Subtitle] =
+FORMAT([Tier 3 SKU Count], "#,##0") & " SKUs • Balanced Seasonal Safety Stock"
+
+/// Subtitle for Tier 4 card: "N SKUs • High Velocity FMCG Flow"
+[Tier 4 SKU Subtitle] =
+FORMAT([Tier 4 SKU Count], "#,##0") & " SKUs • High Velocity FMCG Flow"
+
+/// Subtitle for Tier 5 card: "N SKUs • Immediate Purchase Order Required"
+[Tier 5 SKU Subtitle] =
+FORMAT([Tier 5 SKU Count], "#,##0") & " SKUs • Immediate Purchase Order Required"

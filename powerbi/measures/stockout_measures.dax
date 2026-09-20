@@ -1,0 +1,131 @@
+/* ==============================================================================
+   STOCKOUT DETAIL & ALERT MEASURES
+   Display Folder: Service\Stockout Detail
+   Table in PBI: FactStockout
+   Source of truth: Synced from Power BI via Tabular Editor export — 2026-09-17
+
+   These measures support the Top-N stockout alert cards on Page 1 (Control Tower)
+   and Page 2 (Inventory Health). They use TOPN() patterns to surface the highest-
+   revenue-impact stockout events dynamically without hard-coding supplier names.
+   ============================================================================== */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 1: IN-CONTEXT INFO STRINGS (require single row context from a table visual)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Combined SKU + Category + Facility + Reason string for the currently filtered stockout row
+/// Used in table visual "info" column — requires one stockout row in context
+[Stockout Item Info] =
+SELECTEDVALUE(DimProduct[ProductSKU]) & " • " & SELECTEDVALUE(DimProduct[CategoryName]) &
+UNICHAR(10) &
+"Facility: " & SELECTEDVALUE(DimWarehouse[WarehouseCode]) & " • Reason: " & SELECTEDVALUE(FactStockout[StockoutAttributedReason])
+
+/// Revenue impact + outage duration string for the currently filtered stockout row
+[Stockout Metrics Info] =
+FORMAT([Estimated Lost Sales Revenue], "$#,##0") &
+UNICHAR(10) &
+FORMAT(SELECTEDVALUE(FactStockout[StockoutDurationDays]), "#,##0") & "d Outage"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 2: TOP-N STOCKOUT ALERT MEASURES
+// TOPN() pattern: retrieves the Nth-highest revenue stockout event across the entire
+// FactStockout table regardless of current visual filter context.
+// Used for the fixed alert cards on Page 1 Executive Control Tower.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── RANK #1 ──────────────────────────────────────────────────────────────────
+
+/// Lost revenue amount for the highest-impact stockout event
+[Stockout #1 Revenue] =
+MAXX(
+    TOPN(1, FactStockout, [Estimated Lost Sales Revenue], DESC),
+    [Estimated Lost Sales Revenue]
+)
+
+/// Detail string for the highest-impact stockout event
+/// Format: "SKU-XXXXX • Category\nFacility: DC-XXX • Reason: ... (Xd Outage)"
+[Stockout #1 Details] =
+VAR T      = TOPN(1, FactStockout, [Estimated Lost Sales Revenue], DESC)
+VAR Sku    = MAXX(T, FactStockout[ProductSKU])
+VAR Cat    = LOOKUPVALUE(DimProduct[CategoryName],    DimProduct[ProductKey],    MAXX(T, FactStockout[ProductKey]))
+VAR Wh     = LOOKUPVALUE(DimWarehouse[WarehouseCode], DimWarehouse[WarehouseKey], MAXX(T, FactStockout[WarehouseKey]))
+VAR Reason = SUBSTITUTE(MAXX(T, FactStockout[StockoutAttributedReason]), "Inventory ", "")
+VAR Outage = FORMAT(MAXX(T, FactStockout[StockoutDurationDays]), "#,##0") & "d Outage"
+RETURN
+    Sku & " • " & Cat & UNICHAR(10) & "Facility: " & Wh & " • Reason: " & Reason & "   (" & Outage & ")"
+
+// ── RANK #2 ──────────────────────────────────────────────────────────────────
+
+/// Lost revenue amount for the 2nd highest-impact stockout event
+[Stockout #2 Revenue] =
+VAR T2_all = TOPN(2, FactStockout, [Estimated Lost Sales Revenue], DESC)
+VAR T2     = TOPN(1, T2_all, [Estimated Lost Sales Revenue], ASC)
+RETURN
+    MAXX(T2, [Estimated Lost Sales Revenue])
+
+/// Detail string for the 2nd highest-impact stockout event
+[Stockout #2 Details] =
+VAR T2_all = TOPN(2, FactStockout, [Estimated Lost Sales Revenue], DESC)
+VAR T2     = TOPN(1, T2_all, [Estimated Lost Sales Revenue], ASC)
+VAR Sku    = MAXX(T2, FactStockout[ProductSKU])
+VAR Cat    = LOOKUPVALUE(DimProduct[CategoryName],    DimProduct[ProductKey],    MAXX(T2, FactStockout[ProductKey]))
+VAR Wh     = LOOKUPVALUE(DimWarehouse[WarehouseCode], DimWarehouse[WarehouseKey], MAXX(T2, FactStockout[WarehouseKey]))
+VAR Reason = SUBSTITUTE(MAXX(T2, FactStockout[StockoutAttributedReason]), "Unexpected ", "")
+VAR Outage = FORMAT(MAXX(T2, FactStockout[StockoutDurationDays]), "#,##0") & "d Outage"
+RETURN
+    Sku & " • " & Cat & UNICHAR(10) & "Facility: " & Wh & " • Reason: " & Reason & "   (" & Outage & ")"
+
+// ── RANK #3 ──────────────────────────────────────────────────────────────────
+
+/// Lost revenue amount for the 3rd highest-impact stockout event
+[Stockout #3 Revenue] =
+VAR T3_all = TOPN(3, FactStockout, [Estimated Lost Sales Revenue], DESC)
+VAR T3     = TOPN(1, T3_all, [Estimated Lost Sales Revenue], ASC)
+RETURN
+    MAXX(T3, [Estimated Lost Sales Revenue])
+
+/// Detail string for the 3rd highest-impact stockout event
+[Stockout #3 Details] =
+VAR T3_all = TOPN(3, FactStockout, [Estimated Lost Sales Revenue], DESC)
+VAR T3     = TOPN(1, T3_all, [Estimated Lost Sales Revenue], ASC)
+VAR Sku    = MAXX(T3, FactStockout[ProductSKU])
+VAR Cat    = LOOKUPVALUE(DimProduct[CategoryName],    DimProduct[ProductKey],    MAXX(T3, FactStockout[ProductKey]))
+VAR Wh     = LOOKUPVALUE(DimWarehouse[WarehouseCode], DimWarehouse[WarehouseKey], MAXX(T3, FactStockout[WarehouseKey]))
+VAR Reason = SUBSTITUTE(MAXX(T3, FactStockout[StockoutAttributedReason]), "Supplier ", "")
+VAR Outage = FORMAT(MAXX(T3, FactStockout[StockoutDurationDays]), "#,##0") & "d Outage"
+RETURN
+    Sku & " • " & Cat & UNICHAR(10) & "Facility: " & Wh & " • Reason: " & Reason & "   (" & Outage & ")"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 3: HTML CARD MEASURES
+// These generate HTML strings consumed by an HTML Content custom visual.
+// Used on the Control Tower (Page 1) for the stockout alert panel.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// HTML markup for the #1 stockout alert card (dark-theme styled)
+[Stockout Card 1 HTML] =
+VAR T       = TOPN(1, FactStockout, [Estimated Lost Sales Revenue], DESC)
+VAR Sku     = MAXX(T, FactStockout[ProductSKU])
+VAR ProdKey = MAXX(T, FactStockout[ProductKey])
+VAR Cat     = LOOKUPVALUE(DimProduct[CategoryName],    DimProduct[ProductKey],    ProdKey)
+VAR WhKey   = MAXX(T, FactStockout[WarehouseKey])
+VAR Wh      = LOOKUPVALUE(DimWarehouse[WarehouseCode], DimWarehouse[WarehouseKey], WhKey)
+VAR Reason  = SUBSTITUTE(MAXX(T, FactStockout[StockoutAttributedReason]), "Inventory ", "")
+VAR Outage  = FORMAT(MAXX(T, FactStockout[StockoutDurationDays]), "#,##0") & "d Outage"
+VAR Rev     = FORMAT(MAXX(T, [Estimated Lost Sales Revenue]), "$#,##0")
+RETURN
+"<div style='background-color: #15181f; border: 1px solid #262b3d; border-radius: 8px; padding: 12px 18px; font-family: Segoe UI, sans-serif; box-sizing: border-box;'>" &
+    "<div style='display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px;'>" &
+        "<div>" &
+            "<span style='font-size: 14px; font-weight: 700; color: #ffffff;'>" & Sku & "</span>" &
+            "<span style='font-size: 13px; color: #94a3b8;'> &bull; " & Cat & "</span>" &
+        "</div>" &
+        "<div style='font-size: 16px; font-weight: 700; color: #f43f5e;'>" & Rev & "</div>" &
+    "</div>" &
+    "<div style='display: flex; justify-content: space-between; align-items: baseline;'>" &
+        "<div style='font-size: 12px; color: #94a3b8;'>" &
+            "Facility: <span style='font-weight: 700; color: #ffffff;'>" & Wh & "</span> &bull; Reason: " & Reason &
+        "</div>" &
+        "<div style='font-size: 12px; color: #64748b;'>" & Outage & "</div>" &
+    "</div>" &
+"</div>"

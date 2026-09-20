@@ -1,0 +1,178 @@
+/* ==============================================================================
+   SKU OPTIMIZATION & REPLENISHMENT MEASURES
+   Display Folder: SKU Optimization
+   Table in PBI: DimProduct
+   Source of truth: Synced from Power BI via Tabular Editor export — 2026-09-17
+
+   These measures live on the DimProduct table in Power BI. They implement
+   dynamic safety stock (King's Formula), reorder point, and ABC/XYZ display
+   logic used on Page 3 — SKU Optimization.
+   ============================================================================== */
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 1: SKU COUNTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Count of distinct SKUs in current filter context
+[Active SKU Count] =
+DISTINCTCOUNT(DimProduct[ProductSKU])
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 2: DEMAND RATE CALCULATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Average daily demand in units across all active dates, ignoring date slicer
+/// NOTE: Uses REMOVEFILTERS(DimDate) to get the full historical average,
+/// not just the sliced period — gives a stable planning rate
+[Average Daily Demand Units] =
+VAR TotalShipped  = SUM(FactSales[ShippedQuantity])
+VAR ActiveDays    = CALCULATE(DISTINCTCOUNT(DimDate[FullDate]), REMOVEFILTERS(DimDate))
+RETURN
+    DIVIDE(TotalShipped, ActiveDays, 0)
+
+/// Expected demand during the average supplier lead time (demand during lead time)
+/// Formula: AvgDailyDemand × AvgActualLeadTimeDays
+/// Falls back to 14-day lead time if no PO data exists for the SKU
+[Mean Lead-Time Demand Units] =
+VAR AvgD  = [Average Daily Demand Units]
+VAR AvgLT = COALESCE(AVERAGE(FactPurchaseOrder[ActualLeadTimeDays]), 14.0)
+RETURN
+    ROUND(AvgD * AvgLT, 0)
+
+/// Average actual supplier lead time — convenience alias on DimProduct table
+/// Same formula as [Average Actual Lead Time Days] in procurement_measures.dax
+[Average Actual Lead Time Days] =
+AVERAGE(FactPurchaseOrder[ActualLeadTimeDays])
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 3: DYNAMIC SAFETY STOCK (KING'S COMBINED FORMULA)
+// Formula: SS = Z × SQRT(LT × σ²(D) + D² × σ²(LT))
+//   Z      = service-level Z-score from DimScenario
+//   LT     = average actual lead time (days)
+//   σ(D)   = sample std dev of daily shipped units
+//   σ(LT)  = sample std dev of actual lead time days
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Dynamic safety stock quantity using King's combined demand+lead-time variance formula
+[Safety Stock Units] =
+VAR TargetSL = SELECTEDVALUE(DimScenario[ServiceLevelTargetPct], 95.0)
+VAR Z =
+    SWITCH(
+        TRUE(),
+        TargetSL >= 99.0, 2.33,
+        TargetSL >= 98.0, 2.05,
+        TargetSL >= 95.0, 1.65,
+        TargetSL >= 90.0, 1.28,
+        1.65
+    )
+VAR AvgD = [Average Daily Demand Units]
+// Build a per-date demand table to compute sample std dev of daily demand
+VAR DailyDemandTable =
+    ADDCOLUMNS(
+        VALUES(DimDate[FullDate]),
+        "@DailyDemand", CALCULATE(SUM(FactSales[ShippedQuantity]))
+    )
+// Fall back to 25% of average demand if insufficient history for std dev
+VAR StdDevD  = COALESCE(STDEVX.S(DailyDemandTable, [@DailyDemand]), AvgD * 0.25)
+VAR AvgLT    = COALESCE(AVERAGE(FactPurchaseOrder[ActualLeadTimeDays]), 14.0)
+VAR StdDevLT = COALESCE(CALCULATE(STDEV.S(FactPurchaseOrder[ActualLeadTimeDays])), 2.0)
+// King's combined variance component
+VAR VarianceComp = (AvgLT * (StdDevD ^ 2)) + ((AvgD ^ 2) * (StdDevLT ^ 2))
+RETURN
+    ROUND(Z * SQRT(MAX(1.0, VarianceComp)), 0)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 4: REORDER POINT
+// ROP = Demand During Lead Time + Safety Stock
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Reorder Point = Mean Lead-Time Demand + Safety Stock
+/// When OnHand falls to or below this level, a replenishment PO should be triggered
+[Reorder Point Units] =
+[Mean Lead-Time Demand Units] + [Safety Stock Units]
+
+/// Buffer status string for SKU detail card display
+[Selected SKU Buffer Status] =
+VAR OnHand = [Current On Hand Quantity]
+VAR ROP    = [Reorder Point Units]
+RETURN
+    IF(
+        OnHand >= ROP,
+        "Status: Ample Stock Buffer (No Outage Risk)",
+        "Status: Reorder Triggered (OnHand ≤ ROP)"
+    )
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 5: SKU DETAIL CARD DISPLAY MEASURES
+// Used on the SKU Optimization page header card when a single SKU is selected
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// SKU code + product name display string for the selected SKU header card
+[Selected SKU Title] =
+VAR CurrentSKU  = SELECTEDVALUE(DimProduct[ProductSKU],     "SKU-00010")
+VAR CurrentName = SELECTEDVALUE(DimProduct[ProductName],    "PrimeSelect Biscuits Item 10")
+RETURN
+    CurrentSKU & " — " & CurrentName
+
+/// ABC/XYZ classification tier badge label (e.g., "TIER AX", "TIER CZ")
+[Selected SKU Tier Badge] =
+VAR ABC = SELECTEDVALUE(DimProduct[ABCClassification], "A")
+VAR XYZ = SELECTEDVALUE(DimProduct[XYZClassification], "Y")
+RETURN
+    "TIER " & ABC & XYZ
+
+/// Category, brand, and standard cost metadata string for the SKU header card
+[Selected SKU Metadata] =
+VAR Cat   = SELECTEDVALUE(DimProduct[CategoryName],     "Snacks & Confectionery")
+VAR Brand = SELECTEDVALUE(DimProduct[BrandName],        "PrimeSelect")
+VAR Cost  = FORMAT(SELECTEDVALUE(DimProduct[UnitStandardCost], 21.41), "$#,##0.00")
+RETURN
+    "Category: " & Cat & " • Brand: " & Brand & " • Standard Landed Cost: " & Cost
+
+/// Formatted lead time display string for SKU card (falls back to "10.0 Days" if no PO data)
+[Selected SKU Lead Time Display] =
+VAR AvgLT = [Average Actual Lead Time Days]
+RETURN
+    IF(
+        ISBLANK(AvgLT),
+        "10.0 Days",
+        FORMAT(AvgLT, "0.0") & " Days"
+    )
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 6: ABC/XYZ MATRIX BADGE COLORS
+// Used in the ABC/XYZ matrix visual cell formatting
+// Color logic: A-class = Emerald, B-class = Blue, C-class/Z-tier = Rose/Amber
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Foreground text color hex for ABC/XYZ matrix badge (based on selected tier)
+[Matrix Badge Color] =
+VAR Tier = SELECTEDVALUE(DimProduct[ABCClassification]) & SELECTEDVALUE(DimProduct[XYZClassification])
+RETURN
+    SWITCH(
+        Tier,
+        "AX", "#10b981",   -- Emerald
+        "AY", "#10b981",   -- Emerald
+        "AZ", "#f59e0b",   -- Amber (high value, high variability — needs attention)
+        "BX", "#38bdf8",   -- Blue
+        "BY", "#38bdf8",   -- Blue
+        "BZ", "#f59e0b",   -- Amber
+        "CZ", "#f43f5e",   -- Rose (low value, unpredictable — highest risk)
+        "#94a3b8"           -- Slate (all other CX/CY combinations)
+    )
+
+/// Background color hex for ABC/XYZ matrix badge (dark variant of the tier color)
+[Matrix Badge Background] =
+VAR Tier = SELECTEDVALUE(DimProduct[ABCClassification]) & SELECTEDVALUE(DimProduct[XYZClassification])
+RETURN
+    SWITCH(
+        Tier,
+        "AX", "#064e3b",   -- Dark Emerald
+        "AY", "#064e3b",   -- Dark Emerald
+        "AZ", "#451a03",   -- Dark Amber
+        "BX", "#0c4a6e",   -- Dark Blue
+        "BY", "#0c4a6e",   -- Dark Blue
+        "BZ", "#451a03",   -- Dark Amber
+        "CZ", "#4c0519",   -- Dark Rose
+        "#1e293b"           -- Dark Slate
+    )
