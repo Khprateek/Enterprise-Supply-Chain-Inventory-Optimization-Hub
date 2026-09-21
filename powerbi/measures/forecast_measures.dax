@@ -1,47 +1,70 @@
 /* ==============================================================================
    FORECAST PERFORMANCE MEASURES
    Display Folder: Forecast
+   Source of truth: Synced from Power BI via Tabular Editor export — 2026-09-17
    ============================================================================== */
 
-/// Consensus forecasted demand units
-[Total Forecasted Quantity] = 
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 1: FORECAST VOLUME
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Consensus forecasted demand units from FactDemandForecast
+[Total Forecasted Quantity] =
 SUM(FactDemandForecast[ForecastedQuantity])
 
-/// Algorithmic baseline statistical projection
-[Baseline Statistical Quantity] = 
+/// Algorithmic baseline statistical projection (pre-planner-adjustment)
+[Baseline Statistical Quantity] =
 SUM(FactDemandForecast[BaselineStatisticalQuantity])
 
-/// Total manual adjustments applied by planners
-[Planner Adjustment Quantity] = 
+/// Total manual adjustments applied by planners over the baseline
+[Planner Adjustment Quantity] =
 SUM(FactDemandForecast[PlannerAdjustmentQuantity])
 
-/// Total forecasted demand value
-[Total Forecast Value] = 
+/// Total forecasted demand value (ForecastedQuantity * UnitListPrice)
+[Total Forecast Value] =
 SUM(FactDemandForecast[ForecastValue])
 
-/// Absolute forecast error units = ABS(Actual Sold - Forecasted) evaluated at the monthly forecast cycle grain
-[Absolute Forecast Error Units] = 
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 2: FORECAST ACCURACY
+// Grain: evaluated at Month × Product × Warehouse level via SUMMARIZE.
+// This ensures ABS error is computed per-SKU-month, not at aggregate level
+// (which would allow positive and negative errors to cancel each other out).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Absolute Forecast Error = SUM(|Actual − Forecast|) at Month × Product × Warehouse grain
+/// IMPLEMENTATION NOTE (PBI actual): Two versions exist. The version in the 'measure' table
+/// uses COALESCE(..., 0) on both actual and forecast to handle nulls explicitly.
+[Absolute Forecast Error Units] =
 SUMX(
     SUMMARIZE(
         FactDemandForecast,
         DimDate[MonthYear],
         DimProduct[ProductKey],
-        DimWarehouse[WarehouseKey],
-        "ActualQty", [Total Ordered Quantity],
-        "FcstQty", [Total Forecasted Quantity]
+        DimWarehouse[WarehouseKey]
     ),
-    ABS([ActualQty] - [FcstQty])
+    VAR ActualDemand   = [Total Ordered Quantity]
+    VAR ForecastDemand = [Total Forecasted Quantity]
+    RETURN
+        ABS( COALESCE(ActualDemand, 0) - COALESCE(ForecastDemand, 0) )
 )
 
-/// Weighted Absolute Percentage Error (WAPE = Sum(|Actual - Forecast|) / Sum(Actual))
-[Forecast WAPE Pct] = 
+/// WAPE (Weighted Absolute Percentage Error) = Total Absolute Error / Total Actual Demand
+/// Industry standard for skewed-distribution products; preferred over MAPE for FMCG
+[Forecast WAPE Pct] =
 DIVIDE([Absolute Forecast Error Units], [Total Ordered Quantity], 0)
 
-/// Forecast accuracy percentage (1 - WAPE)
-[Forecast Accuracy Pct] = 
-MAX(0, 1 - [Forecast WAPE Pct])
+/// Forecast Accuracy = 1 − WAPE (clamped to 0% floor; cannot be negative)
+/// IMPLEMENTATION NOTE (PBI actual): version in 'measure' table adds ISBLANK guard
+[Forecast Accuracy Pct] =
+VAR WAPE = [Forecast WAPE Pct]
+RETURN
+    IF(
+        ISBLANK([Total Ordered Quantity]) || [Total Ordered Quantity] = 0,
+        BLANK(),
+        MAX(0, 1 - WAPE)
+    )
 
-/// Forecast bias percentage = (Sum(Forecast) - Sum(Actual)) / Sum(Actual)
-/// Positive indicates systemic over-forecasting, negative indicates under-forecasting
-[Forecast Bias Pct] = 
+/// Forecast Bias = (Forecast − Actual) / Actual
+/// Positive = systemic over-forecast; Negative = systemic under-forecast
+[Forecast Bias Pct] =
 DIVIDE([Total Forecasted Quantity] - [Total Ordered Quantity], [Total Ordered Quantity], 0)

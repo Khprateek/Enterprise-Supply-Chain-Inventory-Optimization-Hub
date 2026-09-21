@@ -1,20 +1,66 @@
 /* ==============================================================================
    WORKING CAPITAL & CARRYING COST MEASURES
    Display Folder: Working Capital
+   Source of truth: Synced from Power BI via Tabular Editor export — 2026-09-17
    ============================================================================== */
 
-/// Selected annual inventory holding cost rate (default 22%)
-[Annual Carrying Cost Rate] = 
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 1: COGS (shared base — also referenced by Inventory Turns & DIO)
+// IMPLEMENTATION NOTE: In PBI, these live in the 'measure' table. Documented here
+// for logical grouping since they drive all working capital calculations.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Total cost of goods sold for all fulfilled sales in context
+[Total COGS] =
+SUM(FactSales[CostOfGoodsSold])
+
+/// Daily COGS rate = Total COGS / Count of distinct active dates
+[Daily COGS] =
+VAR DaysCount = COUNTROWS(VALUES(DimDate[FullDate]))
+RETURN
+    DIVIDE([Total COGS], DaysCount, 0)
+
+/// Annualized COGS = Total COGS scaled to 365 days
+/// Used as the numerator in Inventory Turnover Ratio
+[Annualized COGS] =
+VAR SelectedDays = COUNTROWS(VALUES(DimDate[FullDate]))
+RETURN
+    DIVIDE([Total COGS] * 365, SelectedDays)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 2: CARRYING COST
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Annual inventory carrying cost rate from scenario parameter (default 22%)
+[Annual Carrying Cost Rate] =
 SELECTEDVALUE(DimScenario[AnnualCarryingCostRatePct], 22.0) / 100.0
 
-/// Total annual inventory carrying cost = Average Daily Valuation * Carrying Cost Rate
-[Annual Inventory Carrying Cost] = 
+/// Annual inventory carrying cost = Average Daily Inventory Valuation × Carrying Rate
+/// IMPLEMENTATION NOTE (PBI actual): version in 'DimScenario' table uses
+/// [Current Inventory Valuation] instead of Average Daily. Both are valid;
+/// Current Valuation approach gives point-in-time holding cost estimate.
+[Annual Inventory Carrying Cost] =
 [Average Daily Inventory Valuation] * [Annual Carrying Cost Rate]
 
-/// Total capital tied up in inventory (Current Inventory Valuation)
-[Total Working Capital In Inventory] = 
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 3: WORKING CAPITAL EXPOSURE
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Total capital locked in inventory (= Current Inventory Valuation)
+[Total Working Capital In Inventory] =
 [Current Inventory Valuation]
 
-/// Potential capital release achievable by eliminating dead stock
-[Potential Working Capital Release] = 
+/// Potential capital release by eliminating dead stock (> 180 days no movement)
+[Potential Working Capital Release] =
 [Dead Stock Valuation]
+
+/// Valuation of inventory classified as severe excess (DIO > 365 days)
+/// IMPLEMENTATION NOTE (PBI actual): lives in 'measure' table as [Severe Excess Valuation]
+[Severe Excess Valuation] =
+CALCULATE(
+    [Current Inventory Valuation],
+    FILTER(
+        VALUES(DimProduct[ProductKey]),
+        [Days of Inventory Outstanding (DIO)] > 365
+    )
+)

@@ -1,56 +1,107 @@
 /* ==============================================================================
    SALES MEASURES
    Display Folder: Sales
+   Source of truth: Synced from Power BI via Tabular Editor export — 2026-09-17
    ============================================================================== */
 
-/// Total units ordered by customers
-[Total Ordered Quantity] = 
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 1: VOLUME
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Total units ordered by customers across all sales order lines
+[Total Ordered Quantity] =
 SUM(FactSales[OrderedQuantity])
 
 /// Total units successfully shipped to customers
-[Total Shipped Quantity] = 
+[Total Shipped Quantity] =
 SUM(FactSales[ShippedQuantity])
 
 /// Total units cancelled prior to fulfillment
-[Total Cancelled Quantity] = 
+[Total Cancelled Quantity] =
 SUM(FactSales[CancelledQuantity])
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 2: REVENUE & MARGIN
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// Gross revenue before discounts
-[Total Gross Sales Revenue] = 
+[Total Gross Sales Revenue] =
 SUM(FactSales[GrossSalesAmount])
 
 /// Total promotional and contract discounts applied
-[Total Discount Amount] = 
+[Total Discount Amount] =
 SUM(FactSales[DiscountAmount])
 
 /// Net revenue realized after discounts
-[Total Net Sales Revenue] = 
+[Total Net Sales Revenue] =
 SUM(FactSales[NetSalesAmount])
 
 /// Total cost of goods sold for fulfilled sales orders
-[Total Cost of Goods Sold] = 
+/// NOTE: In PBI actual this measure lives in the 'measure' table as [Total COGS].
+/// [Total Cost of Goods Sold] is the alias kept in this file for documentation continuity.
+[Total Cost of Goods Sold] =
 SUM(FactSales[CostOfGoodsSold])
 
-/// Gross profit realized (Net Sales - COGS)
-[Gross Profit Amount] = 
+/// Gross profit realized (Net Sales − COGS)
+[Gross Profit Amount] =
 [Total Net Sales Revenue] - [Total Cost of Goods Sold]
 
 /// Gross profit margin percentage
-[Gross Profit Margin Pct] = 
+[Gross Profit Margin Pct] =
 DIVIDE([Gross Profit Amount], [Total Net Sales Revenue], 0)
 
 /// Average discount percentage granted across transactions
-[Average Discount Pct] = 
+[Average Discount Pct] =
 DIVIDE([Total Discount Amount], [Total Gross Sales Revenue], 0)
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 3: ORDER COUNTS & CYCLE TIME
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// Total distinct customer sales orders processed
-[Total Sales Order Count] = 
+[Total Sales Order Count] =
 DISTINCTCOUNT(FactSales[SalesOrderID])
 
 /// Total sales order line items
-[Total Sales Line Count] = 
+[Total Sales Line Count] =
 COUNTROWS(FactSales)
 
 /// Average order cycle time in days from order placement to customer delivery
-[Average Order Cycle Time Days] = 
+[Average Order Cycle Time Days] =
 AVERAGE(FactSales[OrderLineCycleTimeDays])
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 4: DEMAND RATE & REPLENISHMENT TRIGGERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Daily demand rate = Total Shipped Units / Count of distinct active dates
+/// Used as the numerator component for Forward Days of Supply
+[Daily Demand Units] =
+DIVIDE(
+    SUM(FactSales[ShippedQuantity]),
+    COUNTROWS(VALUES(DimDate[FullDate])),
+    0
+)
+
+/// Forward Days of Supply = Current On-Hand Quantity / Daily Demand Rate
+/// Returns 9999 (sentinel value = "No Demand / Infinite Supply") when demand is zero
+[Forward Days of Supply] =
+DIVIDE([Current On Hand Quantity], [Daily Demand Units], 9999)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 5: PLANNER ACTION RECOMMENDATION
+// Used in Page 8 Planner Workbench action column
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Recommended supply action based on Forward Days of Supply and active stockout events
+[Recommended Planner Action] =
+VAR FwdDays      = [Forward Days of Supply]
+VAR StockoutEvents = CALCULATE(COUNTROWS(FactStockout))
+RETURN
+SWITCH(
+    TRUE(),
+    FwdDays > 730,      "Freeze Replenishment POs & Rebalance",
+    FwdDays > 365,      "Cancel Inbound & Mark Clearance",
+    StockoutEvents > 0, "Expedite Emergency PO",
+                        "Monitor Run Rate"
+)

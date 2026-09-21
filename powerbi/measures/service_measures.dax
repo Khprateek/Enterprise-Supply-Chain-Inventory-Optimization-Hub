@@ -1,29 +1,45 @@
 /* ==============================================================================
    SERVICE LEVEL & STOCKOUT MEASURES
    Display Folder: Service
+   Source of truth: Synced from Power BI via Tabular Editor export — 2026-09-17
    ============================================================================== */
 
-/// Sales order line items delivered strictly on-time and in-full
-[Sales OTIF Line Count] = 
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 1: CUSTOMER OTIF
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Sales order lines where both timing (on-time) and quantity (in-full) were met
+/// IMPLEMENTATION NOTE (PBI actual): measure lives in 'measure' table as [OTIF Sales Order Lines]
+[OTIF Sales Order Lines] =
 CALCULATE(
     COUNTROWS(FactSales),
     FactSales[OnTimeInFullFlag] = 1
 )
 
-/// Outbound customer line-level OTIF rate
-[Customer Line OTIF Rate Pct] = 
-DIVIDE([Sales OTIF Line Count], [Total Sales Line Count], 0)
+/// Sales order lines that were successfully shipped (not cancelled)
+/// IMPLEMENTATION NOTE (PBI actual): measure lives in 'measure' table as [Fulfilled Sales Order Lines]
+[Fulfilled Sales Order Lines] =
+CALCULATE(
+    COUNTROWS(FactSales),
+    FactSales[ShippedQuantity] > 0,
+    FactSales[CancelledQuantity] = 0
+)
 
-/// Alias for backwards compatibility
-[Customer OTIF Rate Pct] = [Customer Line OTIF Rate Pct]
+/// Customer order-line OTIF rate = OTIF lines / Fulfilled lines
+/// IMPLEMENTATION NOTE (PBI actual): measure lives in 'measure' table as [Customer OTIF Rate Pct]
+[Customer OTIF Rate Pct] =
+DIVIDE(
+    [OTIF Sales Order Lines],
+    [Fulfilled Sales Order Lines]
+)
 
-/// Distinct sales orders placed
-[Total Distinct Sales Order Count] = 
-DISTINCTCOUNT(FactSales[SalesOrderID])
+/// Static OTIF SLA target constant (85%)
+[Customer OTIF Target] =
+0.85
 
-/// Sales orders delivered strictly on-time and in-full across ALL order lines
-[Sales OTIF Order Count] = 
-VAR OrderSummary = 
+/// Order-level OTIF: an order is OTIF only if ALL its constituent lines are OTIF
+[Sales OTIF Order Count] =
+VAR OrderSummary =
     SUMMARIZE(
         FactSales,
         FactSales[SalesOrderID],
@@ -32,33 +48,57 @@ VAR OrderSummary =
 RETURN
     SUMX(OrderSummary, [@IsOrderOTIF])
 
-/// Order-Level OTIF Rate (Order is OTIF if and only if all constituent lines are delivered OTIF)
-[Customer Order OTIF Rate Pct] = 
-DIVIDE([Sales OTIF Order Count], [Total Distinct Sales Order Count], 0)
+/// Order-level OTIF rate
+[Customer Order OTIF Rate Pct] =
+DIVIDE([Sales OTIF Order Count], DISTINCTCOUNT(FactSales[SalesOrderID]), 0)
 
-/// Unit fill rate percentage (Shipped Units / Ordered Units)
-[Unit Fill Rate Pct] = 
+/// Unit fill rate = Shipped Units / Ordered Units
+[Unit Fill Rate Pct] =
 DIVIDE([Total Shipped Quantity], [Total Ordered Quantity], 0)
 
+/// Regional risk tier classification based on OTIF and stockout rate
+[Regional Risk Tier] =
+SWITCH(
+    TRUE(),
+    [Customer OTIF Rate Pct] < 0.85, "High",
+    [Daily Stockout Rate Pct] > 0.001, "Moderate",
+    "Normal"
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 2: STOCKOUT RATES
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Daily stockout rate = Stockout snapshot rows / Total snapshot rows
+/// IMPLEMENTATION NOTE (PBI actual): Two versions exist — the 'measure' table version
+/// uses [Stockout Snapshot Records] / [Total Snapshot Records] (both from inventory file).
+/// The service_measures version uses IsStockoutFlag column directly. Both are equivalent.
+[Daily Stockout Rate Pct] =
+DIVIDE(
+    [Stockout Snapshot Records],
+    [Total Snapshot Records]
+)
+
+/// Static alert threshold for daily stockout rate (0.2%)
+[Daily Stockout Target] =
+0.002
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 3: STOCKOUT FINANCIAL IMPACT
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// Total count of consolidated stockout outage episodes
-[Stockout Incident Count] = 
+[Stockout Incident Count] =
 COUNTROWS(FactStockout)
 
-/// Total duration in days across all stockout events
-[Total Stockout Days] = 
+/// Total duration in days across all stockout outage events
+[Total Stockout Days] =
 SUM(FactStockout[StockoutDurationDays])
 
 /// Total unfulfilled demand units attributed to stockout events
-[Estimated Lost Demand Units] = 
+[Estimated Lost Demand Units] =
 SUM(FactStockout[EstimatedLostDemandUnits])
 
 /// Total estimated lost revenue due to stockouts
-[Estimated Lost Sales Revenue] = 
+[Estimated Lost Sales Revenue] =
 SUM(FactStockout[EstimatedLostRevenueAmount])
-
-/// Daily stockout rate (% of SKU-Warehouse combinations with zero available stock)
-[Daily Stockout Rate Pct] = 
-VAR TotalCombos = COUNTROWS(FactInventorySnapshot)
-VAR StockoutCombos = CALCULATE(COUNTROWS(FactInventorySnapshot), FactInventorySnapshot[IsStockoutFlag] = 1)
-RETURN
-    DIVIDE(StockoutCombos, TotalCombos, 0)

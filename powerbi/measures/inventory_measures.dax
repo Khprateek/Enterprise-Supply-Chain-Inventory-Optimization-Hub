@@ -1,75 +1,227 @@
 /* ==============================================================================
    INVENTORY MEASURES
    Display Folder: Inventory
+   Source of truth: Synced from Power BI via Tabular Editor export — 2026-09-17
    ============================================================================== */
 
-/// Total on-hand units for the selected period (semi-additive: evaluated on the last available date)
-[Current On Hand Quantity] = 
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 1: CURRENT STOCK POSITION
+// Semi-additive measures. Use LASTNONBLANK to evaluate on the latest snapshot date
+// in filter context — this is the correct pattern for periodic snapshot fact tables.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Total on-hand units at the latest snapshot date in filter context
+[Current On Hand Quantity] =
 CALCULATE(
     SUM(FactInventorySnapshot[OnHandQuantity]),
     LASTNONBLANK(DimDate[FullDate], CALCULATE(COUNTROWS(FactInventorySnapshot)))
 )
 
-/// Total available units for sale (OnHand - Reserved) evaluated on the last available date
-[Current Available Quantity] = 
+/// Total available units (OnHand − Reserved) at latest snapshot date
+[Current Available Quantity] =
 CALCULATE(
     SUM(FactInventorySnapshot[AvailableQuantity]),
     LASTNONBLANK(DimDate[FullDate], CALCULATE(COUNTROWS(FactInventorySnapshot)))
 )
 
-/// Total reserved units committed to sales orders evaluated on the last available date
-[Current Reserved Quantity] = 
+/// Total reserved units committed to open sales orders at latest snapshot date
+[Current Reserved Quantity] =
 CALCULATE(
     SUM(FactInventorySnapshot[ReservedQuantity]),
     LASTNONBLANK(DimDate[FullDate], CALCULATE(COUNTROWS(FactInventorySnapshot)))
 )
 
-/// Pipeline inbound units on open replenishment POs evaluated on the last available date
-[Current Inbound Pipeline Quantity] = 
+/// Pipeline inbound units on open replenishment POs at latest snapshot date
+[Current Inbound Pipeline Quantity] =
 CALCULATE(
     SUM(FactInventorySnapshot[InTransitInboundQuantity]),
     LASTNONBLANK(DimDate[FullDate], CALCULATE(COUNTROWS(FactInventorySnapshot)))
 )
 
-/// Total dollar valuation of inventory (OnHand * UnitLandedCost) evaluated on the last available date
-[Current Inventory Valuation] = 
-CALCULATE(
-    SUM(FactInventorySnapshot[InventoryValuation]),
-    LASTNONBLANK(DimDate[FullDate], CALCULATE(COUNTROWS(FactInventorySnapshot)))
-)
+/// Latest calendar date for which an inventory snapshot exists in filter context
+/// NOTE: Used as a helper VAR anchor in aging tier measures below
+[Latest Inventory Snapshot Date] =
+MAX(FactInventorySnapshot[SnapshotDate])
 
-/// Average daily inventory units across the selected date range
-[Average Daily Inventory Units] = 
-AVERAGEX(
-    VALUES(DimDate[FullDate]),
-    CALCULATE(SUM(FactInventorySnapshot[OnHandQuantity]))
-)
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 2: INVENTORY VALUATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Raw periodic sum of InventoryValuation across ALL snapshot dates in context
+/// NOTE: Semi-additive — do NOT display this on a total card. Use [Current Inventory Valuation] instead.
+[Inventory Valuation] =
+SUM(FactInventorySnapshot[InventoryValuation])
+
+/// Inventory valuation at the latest snapshot date in filter context
+/// IMPLEMENTATION NOTE (PBI actual): Uses MAX(SnapshotDate) pattern so it works
+/// correctly with explicit date slicer filters on the report canvas.
+[Current Inventory Valuation] =
+VAR MaxSnapshotDateInContext =
+    MAX(FactInventorySnapshot[SnapshotDate])
+RETURN
+    CALCULATE(
+        SUM(FactInventorySnapshot[InventoryValuation]),
+        FactInventorySnapshot[SnapshotDate] = MaxSnapshotDateInContext
+    )
 
 /// Average daily inventory valuation across the selected date range
-[Average Daily Inventory Valuation] = 
+/// Used as the denominator for Inventory Turns and DIO calculations
+[Average Daily Inventory Valuation] =
 AVERAGEX(
     VALUES(DimDate[FullDate]),
     CALCULATE(SUM(FactInventorySnapshot[InventoryValuation]))
 )
 
-/// Total valuation of dead stock (items with no movement in >= 180 days)
-[Dead Stock Valuation] = 
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 3: SNAPSHOT RECORD COUNTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Total snapshot rows in current filter context (date + product + warehouse)
+[Total Snapshot Records] =
+COUNTROWS(FactInventorySnapshot)
+
+/// Total snapshot rows ignoring all date filters — used for pipeline health page
+[Total Inventory Snapshot Rows] =
 CALCULATE(
-    SUM(FactInventorySnapshot[InventoryValuation]),
-    FactInventorySnapshot[IsDeadStockFlag] = 1,
-    LASTNONBLANK(DimDate[FullDate], CALCULATE(COUNTROWS(FactInventorySnapshot)))
+    COUNTROWS(FactInventorySnapshot),
+    REMOVEFILTERS(DimDate)
 )
 
-/// Ratio of dead stock valuation to total inventory valuation
-[Dead Stock Valuation Pct] = 
+/// Snapshot rows where AvailableQuantity ≤ 0 (active stockout positions)
+[Stockout Snapshot Records] =
+CALCULATE(
+    COUNTROWS(FactInventorySnapshot),
+    FactInventorySnapshot[AvailableQuantity] <= 0
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 4: AGING TIER VALUATIONS
+// Evaluated at the latest snapshot date only. Used on Page 2 Inventory Health.
+// DaysSinceLastMovement thresholds:
+//   ≤ 60d  = Healthy Active
+//   61–120d = Slow Moving
+//   121–180d = Stagnant At-Risk
+//   > 180d  = Dead Stock
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Inventory valuation of healthy active stock (movement within 60 days)
+[Healthy Active Valuation] =
+VAR LatestDate = [Latest Inventory Snapshot Date]
+RETURN
+CALCULATE(
+    SUM(FactInventorySnapshot[InventoryValuation]),
+    FactInventorySnapshot[SnapshotDate] = LatestDate,
+    FactInventorySnapshot[DaysSinceLastMovement] <= 60
+)
+
+/// Inventory valuation of slow-moving stock (61–120 days since last movement)
+[Slow Moving Valuation] =
+VAR LatestDate = [Latest Inventory Snapshot Date]
+RETURN
+CALCULATE(
+    SUM(FactInventorySnapshot[InventoryValuation]),
+    FactInventorySnapshot[SnapshotDate] = LatestDate,
+    FactInventorySnapshot[DaysSinceLastMovement] > 60,
+    FactInventorySnapshot[DaysSinceLastMovement] <= 120
+)
+
+/// Inventory valuation of stagnant at-risk stock (121–180 days since last movement)
+[Stagnant At-Risk Valuation] =
+VAR LatestDate = [Latest Inventory Snapshot Date]
+RETURN
+CALCULATE(
+    SUM(FactInventorySnapshot[InventoryValuation]),
+    FactInventorySnapshot[SnapshotDate] = LatestDate,
+    FactInventorySnapshot[DaysSinceLastMovement] > 120,
+    FactInventorySnapshot[DaysSinceLastMovement] <= 180
+)
+
+/// Inventory valuation of dead stock (> 180 days since last movement)
+/// IMPLEMENTATION NOTE (PBI actual): Uses explicit SnapshotDate filter + DaysSinceLastMovement
+/// threshold rather than IsDeadStockFlag, to stay consistent with the aging tier definitions above.
+[Dead Stock Valuation] =
+VAR LatestDate = [Latest Inventory Snapshot Date]
+RETURN
+CALCULATE(
+    SUM(FactInventorySnapshot[InventoryValuation]),
+    FactInventorySnapshot[SnapshotDate] = LatestDate,
+    FactInventorySnapshot[DaysSinceLastMovement] > 180
+)
+
+/// Dead stock as a percentage of total current inventory valuation
+[Dead Stock Valuation Pct] =
 DIVIDE([Dead Stock Valuation], [Current Inventory Valuation], 0)
 
-/// Days of Inventory Outstanding (DIO = Average Inventory / Daily COGS)
-[Days of Inventory Outstanding (DIO)] = 
-VAR DailyCOGS = DIVIDE([Total Cost of Goods Sold], COUNTROWS(VALUES(DimDate[FullDate])), 0)
-RETURN
-    DIVIDE([Average Daily Inventory Valuation], DailyCOGS, 0)
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 5: AGING TIER DISPLAY MEASURES
+// Used with DimInventoryAgingTier helper table on Page 2.
+// DimInventoryAgingTier columns: SortOrder (1–4), TierName, Target Color
+// ─────────────────────────────────────────────────────────────────────────────
 
-/// Annualized Inventory Turns = Total Annual COGS / Average Daily Inventory Valuation
-[Inventory Turnover Ratio] = 
-DIVIDE([Total Cost of Goods Sold], [Average Daily Inventory Valuation], 0)
+/// Share of current inventory in the tier selected via DimInventoryAgingTier slicer
+[Aging Tier Share Pct] =
+SWITCH(
+    SELECTEDVALUE(DimInventoryAgingTier[SortOrder]),
+    1, DIVIDE([Healthy Active Valuation],    [Current Inventory Valuation], 0),
+    2, DIVIDE([Slow Moving Valuation],       [Current Inventory Valuation], 0),
+    3, DIVIDE([Stagnant At-Risk Valuation],  [Current Inventory Valuation], 0),
+    4, DIVIDE([Dead Stock Valuation],        [Current Inventory Valuation], 0)
+)
+
+/// Hex color code for the tier bar, driven by DimInventoryAgingTier[Target Color]
+[Aging Tier Bar Color] =
+SELECTEDVALUE(DimInventoryAgingTier[Target Color], "#3b82f6")
+
+/// Formatted label showing valuation + share pct for the selected aging tier
+[Aging Tier Label] =
+VAR Val =
+    SWITCH(
+        SELECTEDVALUE(DimInventoryAgingTier[SortOrder]),
+        1, [Healthy Active Valuation],
+        2, [Slow Moving Valuation],
+        3, [Stagnant At-Risk Valuation],
+        4, [Dead Stock Valuation]
+    )
+VAR Pct = [Aging Tier Share Pct]
+RETURN
+    IF(
+        Val >= 1000000000,
+        "$" & FORMAT(DIVIDE(Val, 1000000000), "0.00") & " B (" & FORMAT(Pct, "0%") & ")",
+        "$" & FORMAT(DIVIDE(Val, 1000000), "0.0") & " M (" & FORMAT(Pct, "0%") & ")"
+    )
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 6: TURNS & DIO
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Inventory Turnover Ratio = Annualized COGS / Average Daily Inventory Valuation
+/// IMPLEMENTATION NOTE (PBI actual): references [Annualized COGS] from 'measure' table
+[Inventory Turnover Ratio] =
+DIVIDE([Annualized COGS], [Average Daily Inventory Valuation], 0)
+
+/// Days of Inventory Outstanding = 365 / Inventory Turnover Ratio
+/// IMPLEMENTATION NOTE (PBI actual): uses the Annualized COGS turnover route for consistency
+[Days of Inventory Outstanding (DIO)] =
+DIVIDE(365, [Inventory Turnover Ratio], 0)
+
+/// Inventory valuation of stock with DIO > 365 days (severe excess)
+[Severe Excess Valuation] =
+CALCULATE(
+    [Current Inventory Valuation],
+    FILTER(
+        VALUES(DimProduct[ProductKey]),
+        [Days of Inventory Outstanding (DIO)] > 365
+    )
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 7: STORAGE UTILIZATION
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Storage utilization = Pallets Occupied / Total Storage Capacity Pallets
+/// Conversion factor: 350 units per standard industrial pallet
+[Storage Utilization Pct] =
+VAR TotalOnHandUnits   = [Current On Hand Quantity]
+VAR PalletsOccupied    = DIVIDE(TotalOnHandUnits, 350, 0)
+RETURN
+    DIVIDE(PalletsOccupied, [Total Storage Capacity Pallets], 0)
