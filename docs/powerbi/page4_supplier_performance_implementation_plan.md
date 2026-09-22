@@ -114,10 +114,341 @@ Build in this order (each section depends on the measures of the prior):
 
 ---
 
-## 4. DAX Measures: Full Specification
+## 4. DAX Measures for Page 4
 
-> All measures go into Display Folders in the semantic model.  
-> **Build upon** existing files [`procurement_measures.dax`](file:///d:/JOB/1.Buid_Skill/Work/Enterprise%20Supply%20Chain%20%26%20Inventory%20Optimization%20Hub/powerbi/measures/procurement_measures.dax) and [`supplier_measures.dax`](file:///d:/JOB/1.Buid_Skill/Work/Enterprise%20Supply%20Chain%20%26%20Inventory%20Optimization%20Hub/powerbi/measures/supplier_measures.dax) — do not recreate existing measures.
+### 4.0 Existing Measures — Reference Only
+
+The measures below **already exist** in the documented `.dax` files. Do **not** recreate them in Power BI if they already exist in the model. Verify each one is present before building visuals.
+
+| Measure | File | Validation Benchmark |
+|:---|:---|:---|
+| `[Total Procurement Spend]` | [`procurement_measures.dax`](file:///d:/JOB/1.Buid_Skill/Work/Enterprise%20Supply%20Chain%20%26%20Inventory%20Optimization%20Hub/powerbi/measures/procurement_measures.dax) | ≈ $34.05 B |
+| `[Total PO Line Count]` | `procurement_measures.dax` | ≈ 1,110,903 lines |
+| `[Completed PO Line Count]` | `procurement_measures.dax` | — |
+| `[PO OTIF Line Count]` | `procurement_measures.dax` | — |
+| `[Procurement OTIF Rate Pct]` | `procurement_measures.dax` | ≈ 35.8% overall |
+| `[Procurement On-Time Rate Pct]` | `procurement_measures.dax` | ≈ 39.9% |
+| `[Procurement In-Full Rate Pct]` | `procurement_measures.dax` | ≈ 85.4% |
+| `[Average Actual Lead Time Days]` | `procurement_measures.dax` | ≈ 25.8d overall |
+| `[Average Contract Lead Time Days]` | `procurement_measures.dax` | ≈ 24.2d |
+| `[Average Lead Time Variance Days]` | `procurement_measures.dax` | ≈ +1.6d |
+| `[Total PO Received Quantity]` | `procurement_measures.dax` | ≈ 1,364,506,058 units |
+| `[Total PO Rejected Quantity]` | `procurement_measures.dax` | ≈ 20,185,926 units |
+| `[Inbound Defect Rate Pct]` | `procurement_measures.dax` | ≈ 1.48% |
+| `[Active Supplier Count]` | [`supplier_measures.dax`](file:///d:/JOB/1.Buid_Skill/Work/Enterprise%20Supply%20Chain%20%26%20Inventory%20Optimization%20Hub/powerbi/measures/supplier_measures.dax) | = 500 |
+| `[Supplier Monthly OTIF Avg Pct]` | `supplier_measures.dax` | Tier 1 ≈ 64.9%, Tier 3 ≈ 8.8% |
+| `[Scorecard Average Lead Time Days]` | `supplier_measures.dax` | Tier 1 ≈ 8.2d, Tier 3 ≈ 45.8d |
+| `[Critical SLA Breach Count]` | `supplier_measures.dax` | — |
+| `[Stockout Incident Count]` | [`service_measures.dax`](file:///d:/JOB/1.Buid_Skill/Work/Enterprise%20Supply%20Chain%20%26%20Inventory%20Optimization%20Hub/powerbi/measures/service_measures.dax) | — |
+
+---
+
+### 4.1 Net-New Measures to Build for Page 4
+
+> All 11 measures below must be **created in Power BI**, then copied back into the appropriate `.dax` file.  
+> Each measure is written to **reuse existing measures** as building blocks — no logic is duplicated.
+
+---
+
+#### Display Folder: `Procurement\OTIF`
+
+---
+
+##### `[Procurement OTIF Target]`
+**Why:** Single constant as the composition anchor. Every gap/label/color measure references this instead of hard-coding `0.85` in multiple places. Change the target once here — all derived measures update automatically.
+
+```dax
+[Procurement OTIF Target] = 0.85
+```
+
+---
+
+##### `[OTIF vs Target Gap]`
+**Why:** Drives conditional formatting on the OTIF headline card. Positive = underperforming.  
+**Composes:** `[Procurement OTIF Rate Pct]` + `[Procurement OTIF Target]`
+
+```dax
+[OTIF vs Target Gap] =
+[Procurement OTIF Target] - [Procurement OTIF Rate Pct]
+```
+
+**Validation:** At 35.8% OTIF → gap = **+49.2 pp**
+
+---
+
+##### `[OTIF Status Label]`
+**Why:** Sub-label text on the OTIF headline card — shows compliance tier in plain language.  
+**Composes:** `[Procurement OTIF Rate Pct]` + `[Procurement OTIF Target]`
+
+```dax
+[OTIF Status Label] =
+VAR OTIF = [Procurement OTIF Rate Pct]
+RETURN
+SWITCH(
+    TRUE(),
+    OTIF >= [Procurement OTIF Target],    "✅ SLA Met",
+    OTIF >= 0.70,                          "⚠️ Watch Zone",
+    OTIF >= 0.50,                          "🔶 At Risk",
+                                           "🚨 SLA Breach"
+)
+```
+
+---
+
+#### Display Folder: `Procurement\Lead Time`
+
+---
+
+##### `[Lead Time Card Subtitle]`
+**Why:** Reference label string for the Avg Lead-Time Delay card (Card 5). Saves building a text box manually.  
+**Composes:** `[Average Actual Lead Time Days]` + `[Average Contract Lead Time Days]`
+
+```dax
+[Lead Time Card Subtitle] =
+"Actual "  & FORMAT( [Average Actual Lead Time Days],   "0.0" ) & "d  vs  " &
+"Quoted "  & FORMAT( [Average Contract Lead Time Days], "0.0" ) & "d"
+```
+
+---
+
+##### `[Lead Time Variance Days (Actual Dock Date)]`
+**Why:** Activates the inactive `ActualDockReceiptDateKey → DimDate` relationship so time-intelligence visuals can slice by *when deliveries arrived* rather than when POs were created.  
+**Composes:** `[Average Lead Time Variance Days]` wrapped in `USERELATIONSHIP`
+
+```dax
+[Lead Time Variance Days (Actual Dock Date)] =
+CALCULATE(
+    [Average Lead Time Variance Days],
+    USERELATIONSHIP(
+        FactPurchaseOrder[ActualDockReceiptDateKey],
+        DimDate[DateKey]
+    )
+)
+```
+
+> [!NOTE]
+> Only place this measure on delivery-period time-intelligence visuals (e.g., trend line on drill-through page). Do **not** use it on the main page summary cards — those should use the active POCreationDate relationship.
+
+---
+
+#### Display Folder: `Procurement\Quality`
+
+---
+
+##### `[Inbound Acceptance Rate Pct]`
+**Why:** Complement of the defect rate — used as the sub-label on the "Total Units Received" card.  
+**Composes:** `[Inbound Defect Rate Pct]`
+
+```dax
+[Inbound Acceptance Rate Pct] =
+1 - [Inbound Defect Rate Pct]
+```
+
+**Validation:** ≈ **98.52%**
+
+---
+
+##### `[Acceptance Rate Label]`  &  `[Defect Rate Label]`
+**Why:** Pre-formatted string sub-labels for the two Quality KPI cards. Keeps formatting logic out of the visual's format pane.  
+**Composes:** `[Inbound Acceptance Rate Pct]` + `[Inbound Defect Rate Pct]`
+
+```dax
+[Acceptance Rate Label] =
+FORMAT( [Inbound Acceptance Rate Pct], "0.00%" ) & " Accepted"
+
+[Defect Rate Label] =
+FORMAT( [Inbound Defect Rate Pct], "0.00%" ) & " Inbound Defect Rate"
+```
+
+---
+
+##### `[Pct of Late Deliveries by Root Cause]`
+**Why:** Bar chart axis measure for the Root Cause breakdown visual. Computes the share of late lines per `DelayRootCauseCategory` group relative to all late lines, so the bars sum to 100%.  
+**Composes:** `[Completed PO Line Count]` as denominator anchor; uses `REMOVEFILTERS` to lift the category filter for the total.
+
+```dax
+[Pct of Late Deliveries by Root Cause] =
+VAR LateInContext =
+    CALCULATE(
+        [Completed PO Line Count],
+        FactPurchaseOrder[LeadTimeVarianceDays] > 0
+    )
+VAR AllLate =
+    CALCULATE(
+        [Completed PO Line Count],
+        FactPurchaseOrder[LeadTimeVarianceDays] > 0,
+        REMOVEFILTERS( FactPurchaseOrder[DelayRootCauseCategory] )
+    )
+RETURN
+    DIVIDE( LateInContext, AllLate, 0 )
+```
+
+> **Optimization vs original plan:** Replaced the raw `COUNTROWS( FactPurchaseOrder )` + duplicate `POStatus = "Completed"` filter with `[Completed PO Line Count]` which already encapsulates that filter. Result is identical; logic is DRY.
+
+---
+
+#### Display Folder: `Supplier\Scorecard`
+
+---
+
+##### `[Scorecard Average Lead Time Std Dev]`
+**Why:** Shows lead-time *predictability* per tier (not just average). Tier 1 ≈ 0 std dev = JIT-reliable; Tier 3 = high std dev = unpredictable delivery windows.
+
+```dax
+[Scorecard Average Lead Time Std Dev] =
+AVERAGE( FactSupplierMonthlyPerformance[LeadTimeStdDevDays] )
+```
+
+---
+
+##### `[Scorecard Avg Line Fill Rate Pct]`
+**Why:** Third metric column in the Tier Comparison matrix, alongside OTIF and Lead Time.
+
+```dax
+[Scorecard Avg Line Fill Rate Pct] =
+AVERAGE( FactSupplierMonthlyPerformance[LineFillRatePct] )
+```
+
+---
+
+##### `[Supplier Vendor Risk Score]`
+**Why:** Pre-computed composite risk index (0–100) stored in `DimSupplier`. In a table visual with one supplier per row, `MAX` returns the single row's value. In any other context (card, matrix total), it returns the average across suppliers in context — both are semantically correct.  
+**Composes:** `DimSupplier[VendorRiskScore]`
+
+```dax
+[Supplier Vendor Risk Score] =
+IF(
+    HASONEVALUE( DimSupplier[SupplierKey] ),
+    MAX( DimSupplier[VendorRiskScore] ),
+    AVERAGE( DimSupplier[VendorRiskScore] )
+)
+```
+
+> **Optimization vs original plan:** Original used bare `AVERAGE()`. The `HASONEVALUE` branch returns the exact supplier score in a table row context rather than averaging a single row — functionally identical result but semantically correct and avoids a misleading "average of one value" calculation.
+
+---
+
+##### `[Tier3 Stockout Attribution Pct]`
+**Why:** Backs the alert callout "300 Tier 3 suppliers drive 68% of stockout events".  
+**Composes:** `[Stockout Incident Count]` from `service_measures.dax` — reuses the existing row count measure rather than re-writing `COUNTROWS( FactStockout )`.
+
+```dax
+[Tier3 Stockout Attribution Pct] =
+VAR Tier3Count =
+    CALCULATE(
+        [Stockout Incident Count],
+        FactStockout[StockoutAttributedReason] = "Supplier Delayed Inbound",
+        DimSupplier[SupplierTier] = "Tier 3 Tactical"
+    )
+VAR TotalSupplierCaused =
+    CALCULATE(
+        [Stockout Incident Count],
+        FactStockout[StockoutAttributedReason] = "Supplier Delayed Inbound",
+        REMOVEFILTERS( DimSupplier[SupplierTier] )
+    )
+RETURN
+    DIVIDE( Tier3Count, TotalSupplierCaused, 0 )
+```
+
+> [!NOTE]
+> Requires `FactStockout` to have a resolvable path to `DimSupplier` (via `DimProduct[PrimarySupplierKey]` or a direct `SupplierKey` FK added in dbt). Validate the join path before using. See Open Decision #2.
+
+---
+
+#### Display Folder: `Supplier\Actions`
+
+---
+
+##### `[Supplier Recommended Action]`
+**Why:** Drives the "Recommended Action" column in the SLA Breach Watchlist table. Logic is tiered by spend size, sourcing zone, and lead-time variance — all derived from existing measures.  
+**Composes:** `[Procurement OTIF Rate Pct]` + `[Total Procurement Spend]` + `[Average Lead Time Variance Days]`
+
+```dax
+[Supplier Recommended Action] =
+IF(
+    NOT HASONEVALUE( DimSupplier[SupplierKey] ),
+    "—",
+    VAR OTIF     = [Procurement OTIF Rate Pct]
+    VAR Spend    = [Total Procurement Spend]
+    VAR LTVar    = [Average Lead Time Variance Days]
+    VAR Zone     = SELECTEDVALUE( DimSupplier[RegionZone], "Unknown" )
+    RETURN
+    SWITCH(
+        TRUE(),
+        OTIF < 0.09 && Spend > 150000000,  "Shift 30% Volume",
+        OTIF < 0.10 && Zone = "Overseas Inbound", "Dual-Source Mandate",
+        OTIF < 0.10 && LTVar >= 4.0,       "Audit SLA Breach",
+        OTIF < 0.10 && LTVar >= 3.5,       "Freeze New POs",
+        OTIF < 0.15,                        "Penalty Fee Apply",
+        OTIF < 0.40,                        "Improve Action Plan",
+                                            "Monitor"
+    )
+)
+```
+
+> **Why `HASONEVALUE` guard:** This measure uses `SELECTEDVALUE()` for zone and references single-row measures. Without the guard, it returns "—" in card/matrix totals rather than evaluating incorrectly.
+
+---
+
+##### `[Action Background Color]`
+**Why:** Drives conditional background formatting on the Recommended Action column via "Format by field value". Returns a hex string — no conditional formatting rules dialog needed.  
+**Composes:** `[Supplier Recommended Action]`
+
+```dax
+[Action Background Color] =
+SWITCH(
+    [Supplier Recommended Action],
+    "Shift 30% Volume",    "#fff1f2",   -- Rose tint   (urgent)
+    "Audit SLA Breach",    "#fff1f2",   -- Rose tint   (urgent)
+    "Freeze New POs",      "#fff1f2",   -- Rose tint   (urgent)
+    "Penalty Fee Apply",   "#fff1f2",   -- Rose tint   (urgent)
+    "Dual-Source Mandate", "#fffbeb",   -- Amber tint  (strategic)
+    "Improve Action Plan", "#fffbeb",   -- Amber tint  (strategic)
+    "Monitor",             "#f0fdf4",   -- Green tint  (healthy)
+    "#1e293b"                           -- Dark slate  (guard / blank row)
+)
+```
+
+---
+
+### 4.2 Measure Dependency Map
+
+```
+[Procurement OTIF Target]  ◄─── anchor constant (0.85)
+        │
+        ├──► [OTIF vs Target Gap]          = Target − [Procurement OTIF Rate Pct]
+        └──► [OTIF Status Label]           = SWITCH on [Procurement OTIF Rate Pct] vs Target
+
+[Average Actual Lead Time Days]  ◄─── from procurement_measures.dax
+[Average Contract Lead Time Days] ◄─── from procurement_measures.dax
+        │
+        └──► [Lead Time Card Subtitle]     = formatted string of both
+
+[Average Lead Time Variance Days]  ◄─── from procurement_measures.dax
+        └──► [Lead Time Variance Days (Actual Dock Date)]  = CALCULATE(..., USERELATIONSHIP)
+
+[Inbound Defect Rate Pct]  ◄─── from procurement_measures.dax
+        │
+        ├──► [Inbound Acceptance Rate Pct] = 1 − Defect Rate
+        ├──► [Defect Rate Label]           = FORMAT(Defect Rate)
+        └──► [Acceptance Rate Label]       = FORMAT(Acceptance Rate)
+
+[Completed PO Line Count]  ◄─── from procurement_measures.dax
+        └──► [Pct of Late Deliveries by Root Cause] = Late-in-context / All-late
+
+[Stockout Incident Count]  ◄─── from service_measures.dax
+        └──► [Tier3 Stockout Attribution Pct] = Tier3 / TotalSupplierCaused
+
+[Procurement OTIF Rate Pct]  ◄─── from procurement_measures.dax
+[Total Procurement Spend]    ◄─── from procurement_measures.dax
+[Average Lead Time Variance Days] ◄─── from procurement_measures.dax
+        │
+        └──► [Supplier Recommended Action]
+                    └──► [Action Background Color]
+```
+
+---
+
 
 ---
 
