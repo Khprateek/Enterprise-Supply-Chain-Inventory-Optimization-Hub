@@ -1,178 +1,530 @@
 # Enterprise Supply Chain & Inventory Optimization Hub
 
-[![dbt Version](https://img.shields.io/badge/dbt-1.8.0-orange.svg)](https://www.getdbt.com/)
-[![BigQuery](https://img.shields.io/badge/Warehouse-Google%20BigQuery-blue.svg)](https://cloud.google.com/bigquery)
-[![Power BI](https://img.shields.io/badge/Semantic%20Model-Power%20BI%20VertiPaq-yellow.svg)](https://powerbi.microsoft.com/)
-[![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+<div align="center">
 
-## 1. Overview
-The **Enterprise Supply Chain & Inventory Optimization Hub** is an end-to-end analytical data platform and business intelligence solution designed for a multinational retail/FMCG distribution network. 
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![dbt](https://img.shields.io/badge/dbt_Core-1.8.0-FF694B?logo=dbt&logoColor=white)](https://www.getdbt.com/)
+[![BigQuery](https://img.shields.io/badge/Google_BigQuery-Cloud_DW-4285F4?logo=google-cloud&logoColor=white)](https://cloud.google.com/bigquery)
+[![Airflow](https://img.shields.io/badge/Apache_Airflow-2.7+-017CEE?logo=apache-airflow&logoColor=white)](https://airflow.apache.org/)
+[![Power BI](https://img.shields.io/badge/Power_BI-Semantic_Model-F2C811?logo=power-bi&logoColor=black)](https://powerbi.microsoft.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-The platform models a 100-facility fulfillment network managing 10,000 active SKUs across 500 global suppliers, translating 9.55 million operational records into executive-grade decision support across **inventory velocity**, **working capital exposure**, **supplier OTIF reliability**, and **demand sensing**.
+**An end-to-end, production-grade cloud data platform for enterprise supply chain analytics.**  
+Models a 100-facility fulfillment network across 9.55M operational records — from raw ingestion to executive dashboards.
+
+[Architecture](#architecture) · [Data Model](#dimensional-model) · [Quick Start](#quick-start) · [Dashboards](#dashboards) · [Docs](docs/)
+
+</div>
 
 ---
 
-## 2. Core Architecture & Technology Stack
+## Table of Contents
+
+1. [Project Overview](#project-overview)
+2. [Architecture](#architecture)
+3. [Technology Stack](#technology-stack)
+4. [Dataset Profile](#dataset-profile)
+5. [Dimensional Model](#dimensional-model)
+6. [Data Quality Framework](#data-quality-framework)
+7. [Performance Engineering](#performance-engineering)
+8. [Orchestration](#orchestration)
+9. [Dashboards](#dashboards)
+10. [Dynamic Row-Level Security](#dynamic-row-level-security)
+11. [Quick Start](#quick-start)
+12. [Project Structure](#project-structure)
+13. [Key Analytics & KPIs](#key-analytics--kpis)
+
+---
+
+## Project Overview
+
+The **Enterprise Supply Chain & Inventory Optimization Hub** is a full-stack analytical data platform built to demonstrate enterprise-grade data engineering for a fictional multinational retail/FMCG organization.
+
+The platform enables supply chain planners and operations executives to answer:
+
+| Business Question | Analytics Capability |
+|:---|:---|
+| Where are we overstocked or at stockout risk? | SKU-level Days-of-Inventory & Stockout event tracking |
+| What is our working capital exposure? | Inventory value × carrying cost, excess stock identification |
+| Which suppliers are causing lead-time problems? | Supplier OTIF, lead-time variance, PO cycle time |
+| How accurate are our demand forecasts? | WAPE, MAPE, forecast bias at SKU-warehouse-month grain |
+| What safety stock do we actually need? | King's Dynamic Safety Stock formula with live demand and LT volatility |
+| How does performance vary by region / warehouse? | Region → Warehouse drill-through with dynamic RLS |
+
+**Scale:** 9.55M operational records · 100 fulfillment facilities · 10,000 active SKUs · 500 global suppliers · 4-year horizon (2023–2026)
+
+---
+
+## Architecture
+
+The platform implements an **8-layer, cloud-native ELT architecture** following Kimball dimensional modelling methodologies with strict separation of concerns between ingestion, transformation, semantic modelling, and presentation.
 
 ```
-Google Cloud Storage (Raw Parquet)
-   │
-   ▼
-[raw_supply_chain]           <-- BigQuery External Tables (18 Tables, 9.55M rows)
-   │
-   ▼
-[stg_supply_chain]           <-- dbt 1-to-1 Staging Views (16 Models, Typed & Cleaned)
-   │
-   ▼
-[int_supply_chain]           <-- Intermediate Aggregations & Joins (2 Models)
-   │
-   ▼
-[analytics_supply_chain]     <-- Kimball Marts (17 Models: 9 Dims, 7 Facts, 1 Scorecard)
-   │
-   ▼
-[snapshots_supply_chain]     <-- dbt SCD2 Product Snapshot (snap_dim_product_scd2)
-   │
-   ▼
-[Power BI Semantic Model]    <-- Pure Star Schema (VertiPaq In-Memory, 8 Measure Libraries)
-   │
-   ▼
-[9 Executive Canvas Pages]   <-- Control Tower, Inventory, SKU, Supplier, Forecast, WC, Sim, Planner, Pipeline
+┌──────────────────────────────────────────────────────────────────────┐
+│  1. SOURCE SYSTEMS                                                   │
+│  ERP · WMS · TMS · APS · Reverse Logistics                           │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             │  Python 3.12 Vectorized Simulation Engine
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  2. LANDING / RAW ZONE  (GCS / data/raw/)                            │
+│  Immutable Parquet files  ·  _ingested_at · _source · _batch_id      │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             │  Quality Gate 1 · Schema & Format Validation
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  3. STAGING LAYER  (BigQuery  stg_supply_chain)                      │
+│  16 dbt Views  ·  Type-cast · Deduplicate · Null-remediation         │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             │  Quality Gate 2 · dbt PK Uniqueness & Not Null
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  4. TRANSFORMATION ENGINE  (dbt Core 1.8.0)                          │
+│  Surrogate keys · SCD Type 2 snapshot · Conformed star schema        │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             │  Quality Gate 3 · Referential Integrity & Balance
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  5. ANALYTICAL WAREHOUSE  (Google BigQuery)                          │
+│  9 Conformed Dims · 8 Partitioned Fact Tables · Materialized Marts   │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             │  Quality Gate 4 · DAX / Warehouse Reconciliation
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  6. SEMANTIC MODEL  (Power BI VertiPaq)                              │
+│  Pure Star Schema · 8 DAX Measure Libraries · Dynamic RLS            │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  7. EXECUTIVE DASHBOARDS  (Power BI Desktop · 9 Canvas Pages)        │
+│  Control Tower · Inventory · SKU · Supplier · Forecast · WC · Sim   │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│  8. BUSINESS PERSONAS                                                │
+│  VP Operations · Regional Planner · Warehouse Planner · Analyst      │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Storage & Compute:** Google BigQuery (Standard SQL, Day/Month Partitioning, Multi-column Clustering)
-- **Data Transformation & Testing:** dbt Core 1.8.0 (`dbt-bigquery`) — 36 Models, 1 SCD2 Snapshot, 173 Tests
-- **Semantic Modeling:** Microsoft Power BI Desktop (Kimball Star Schema, Single-Direction Filters, Dynamic RLS)
-- **Data Engineering:** Python 3.12 (Pandas, PyArrow, NumPy)
-- **Orchestration Reference:** Apache Airflow 2.7+ (`orchestration/airflow/dags/`)
+**Orchestration:** Apache Airflow 2.7+ `dag_supply_chain_daily_elt` triggers every day at **02:00 UTC** — GCS sensor → BigQuery partition sync → `dbt run` → `dbt test` (173 assertions) → Power BI REST API incremental refresh — completing end-to-end in **< 9.6 minutes** against a 6-hour business SLA.
 
 ---
 
-## 3. Dataset Profile (9,551,197 Records / 205.33 MB Parquet)
+## Technology Stack
 
-| Layer / Model | Granularity / Entity | Table Name | Row Count |
-| :--- | :--- | :--- | :---: |
-| **Fact** | Daily SKU-Warehouse Inventory Snapshot | `FactInventorySnapshot` | 5,464,956 |
-| **Fact** | Customer Sales Order Lines | `FactSales` | 2,472,932 |
-| **Fact** | Inbound Purchase Order Lines | `FactPurchaseOrder` | 1,110,903 |
-| **Fact** | Inter-DC Transfers & Adjustments | `FactInventoryMovement` | 175,440 |
-| **Fact** | Monthly Consensus Demand Forecast | `FactDemandForecast` | 179,424 |
-| **Fact** | Customer Return Lines | `FactCustomerReturns` | 103,324 |
-| **Fact / Scorecard** | Monthly Supplier Compliance | `FactSupplierMonthlyPerformance` | 11,852 |
-| **Fact** | Contiguous Stockout Outage Events | `FactStockout` | 913 |
-| **Dimension** | Product Catalog & SCD2 Audit History | `DimProduct` | 11,000 |
-| **Dimension** | Multi-Sourcing Product-Supplier Bridge | `BridgeProductSupplier` | 13,333 |
-| **Dimension** | Commercial Customers & Channels | `DimCustomerChannel` | 5,000 |
-| **Dimension** | 4-Year Calendar Master (2023–2026) | `DimDate` | 1,461 |
-| **Dimension** | Global Suppliers (Tiers 1, 2, 3) | `DimSupplier` | 500 |
-| **Dimension** | Fulfillment Facilities (100 DCs) | `DimWarehouse` | 100 |
-| **Dimension** | Operating Regions | `DimRegion` | 6 |
-| **Dimension** | Supply Chain Planners | `DimEmployeePlanner` | 40 |
-| **Dimension** | S&OP What-If Scenarios | `DimScenario` | 5 |
-| **Security** | Data-Driven Dynamic RLS Mapping | `SecurityUser` | 8 |
+| Layer | Tool / Technology | Version | Role |
+|:---|:---|:---|:---|
+| **Data Warehouse** | Google BigQuery | Standard SQL | Partitioned & clustered analytical storage and compute |
+| **Transformation** | dbt Core (`dbt-bigquery`) | `1.8.0` | In-warehouse SQL transformation, SCD2, dimensional modeling, 173 data tests |
+| **Orchestration** | Apache Airflow | `2.7+` | Daily ELT pipeline scheduling, GCS sensing, dbt CLI, Power BI API trigger |
+| **Semantic Model** | Microsoft Power BI Desktop | VertiPaq | Star schema, DAX business logic, dynamic RLS, 9 executive report pages |
+| **Data Engineering** | Python | `3.12` | Vectorized synthetic data engine, raw validation test suite |
+| **Data Processing** | Pandas / NumPy | `2.2.2` / `2.4.3` | Dataframe vectorization and supply chain calculations |
+| **File Format** | Apache Parquet (PyArrow) | `16.1.0` | Columnar file serialization with compression and audit metadata |
+| **Local Warehousing** | DuckDB | `≥ 1.0.0` | Local query engine for offline development & testing (`dbt-duckdb`) |
+| **Storage (Cloud)** | Google Cloud Storage | — | Raw landing zone for daily Parquet file payloads |
+| **IAM / Security** | GCP IAM Service Accounts | — | Least-privilege BigQuery access (`Data Viewer` + `Job User`) |
+| **Version Control** | Git / GitHub | `2.40+` | Source control, schema drift tracking, multi-environment branching |
 
 ---
 
-## 4. Setup & Reproducibility Guide
+## Dataset Profile
 
-### 4.1 Prerequisites
-- Python 3.12+
-- Git 2.40+
-- (Optional) Google Cloud SDK for BigQuery deployment
+**9,551,197 records · 205.33 MB Parquet** across 18 structured entities.
 
-### 4.2 Installation
+### Fact Tables
+
+| Model | Business Process | Grain | Row Count | Partition Field |
+|:---|:---|:---|---:|:---|
+| `FactInventorySnapshot` | Daily physical stock balance | SKU × Warehouse × Day | **5,464,956** | `snapshot_date` (Day) |
+| `FactSales` | Customer order fulfillment | Sales order line | **2,472,932** | `order_date` (Day) |
+| `FactPurchaseOrder` | Inbound procurement | PO line | **1,110,903** | `po_creation_date` (Day) |
+| `FactDemandForecast` | S&OP consensus planning | SKU × Warehouse × Month | **179,424** | `target_period_date` (Month) |
+| `FactInventoryMovement` | Inter-DC transfers & adjustments | Movement line | **175,440** | `movement_date` (Day) |
+| `FactCustomerReturns` | Reverse logistics | Return line | **103,324** | `return_date` (Month) |
+| `FactSupplierMonthlyPerformance` | Supplier OTIF scorecard | Supplier × Month | **11,852** | `year_month` (Month) |
+| `FactStockout` | Contiguous zero-stock outage events | Outage event | **913** | `outage_start_date` (Day) |
+
+### Dimension & Reference Tables
+
+| Model | Description | Cardinality |
+|:---|:---|---:|
+| `DimProduct` | Product catalog with SCD Type 2 audit history | 11,000 |
+| `BridgeProductSupplier` | M:N product–supplier sourcing relationships | 13,333 |
+| `DimCustomerChannel` | Commercial accounts across wholesale / retail / e-commerce | 5,000 |
+| `DimDate` | 4-year calendar master (2023–2026) with fiscal periods | 1,461 |
+| `DimSupplier` | Global supplier profiles (Tier 1, 2, 3) | 500 |
+| `DimWarehouse` | Fulfillment facility master (100 DCs) | 100 |
+| `DimRegion` | Operating geographic regions | 6 |
+| `DimEmployeePlanner` | Supply chain planners for RLS mapping | 40 |
+| `DimScenario` | S&OP What-If simulation baselines | 5 |
+| `SecurityUser` | Data-driven dynamic RLS user mapping | 8 |
+
+---
+
+## Dimensional Model
+
+The warehouse follows a **Kimball star schema** with conformed dimensions supporting cross-process drill-through.
+
+```
+                        ┌─────────────┐
+                        │   DimDate   │
+                        │ (Role-play: │
+                        │  OrderDate  │
+                        │  ShipDate   │
+                        │  DelivDate) │
+                        └──────┬──────┘
+                               │
+          ┌─────────────┐      │      ┌────────────────┐
+          │ DimCustomer │      │      │  DimWarehouse  │
+          │  Channel    ├──────┤      ├────────────────┤
+          └─────────────┘      │      │   DimRegion    │
+                               │      └────────┬───────┘
+          ┌─────────────┐      │               │
+          │ DimProduct  ├──────┼───── FactSales / FactInventorySnapshot ──── DimScenario
+          │  (SCD2)     │      │               │                             DimPlanner
+          └──────┬──────┘      │      ┌────────┴───────┐
+                 │             │      │  DimSupplier   │
+    ┌────────────┴──────┐      │      └────────────────┘
+    │ BridgeProduct     │      │
+    │ Supplier (M:N)    │      │
+    └───────────────────┘      │
+                               ▼
+                    FactPurchaseOrder / FactDemandForecast
+                    FactInventoryMovement / FactStockout
+                    FactCustomerReturns / FactSupplierMonthlyPerformance
+```
+
+**Advanced Modeling Patterns Implemented:**
+
+- **SCD Type 2** — `snap_dim_product_scd2` tracks standard cost drifts and category reclassifications with `effective_date`, `expiry_date`, and `is_current_flag`. `FactSales` executes a point-in-time join to the historical surrogate key at order date.
+- **Role-Playing Date Dimension** — `DimDate` is aliased across Order Date, Ship Date, Delivery Date, and Expected Delivery Date without ambiguous relationships.
+- **Many-to-Many Bridge** — `BridgeProductSupplier` resolves genuine M:N sourcing relationships (multi-sourced SKUs across Tier 1/2/3 suppliers).
+- **Surrogate Key Generation** — All dimensional surrogate keys use deterministic `FARM_FINGERPRINT()` hashing ensuring idempotent pipeline runs.
+
+---
+
+## Data Quality Framework
+
+**Four validation gates prevent corrupt, duplicate, or un-reconciled data from propagating into executive reporting.**
+
+```
+Gate 1 [Raw]     → Python test suite  · 44 assertions  · PK uniqueness, FK integrity, non-negative stock
+Gate 2 [Staging] → dbt source tests   · unique, not_null, accepted_values, relationships
+Gate 3 [Marts]   → dbt custom SQL     · Referential integrity, inventory balance equations, business constraints
+Gate 4 [BI]      → DAX reconciliation · Measure totals reconciled against BigQuery aggregates
+```
+
+**dbt Test Suite:** 173 automated assertions covering:
+
+| Test Category | Examples |
+|:---|:---|
+| Primary Key Uniqueness | All 17 staging models: `unique` + `not_null` on natural/surrogate keys |
+| Referential Integrity | All fact → dimension foreign key `relationships` tests |
+| Business Constraint | Non-negative `on_hand_quantity`, lead time within 1–365 days, unit price > 0 |
+| Accepted Values | `movement_type` ∈ `{TRANSFER, RECEIPT, ADJUSTMENT, SCRAP}`, `return_reason` codes |
+| Inventory Balance | `OnHand_t = OnHand_{t-1} + Receipts + Adjustments − Sales − Transfers` |
+
+Run the full offline validation suite against raw Parquet:
+
 ```bash
-# 1. Clone the repository
+python tests/validate_dataset.py
+# Expected: VALIDATION SUMMARY: 44 PASSED | 0 FAILED
+```
+
+---
+
+## Performance Engineering
+
+BigQuery analytical workloads are engineered for partition pruning and clustered block reads across all major fact tables.
+
+### Partition Pruning Benchmarks
+
+| Metric | Unpartitioned Baseline | Partitioned + Clustered | Improvement |
+|:---|---:|---:|---:|
+| Bytes scanned (30-day inventory query) | 326.8 MB | 13.7 MB | **95.8% reduction** |
+| Query scan latency | 1,230 ms | 31 ms | **39.7× speedup** |
+
+### Clustering Strategy
+
+```sql
+-- FactInventorySnapshot  →  CLUSTER BY product_key, warehouse_key
+-- FactSales              →  CLUSTER BY product_key, warehouse_key, customer_channel_key
+-- FactPurchaseOrder      →  CLUSTER BY supplier_key, product_key, receiving_warehouse_key
+-- DimProduct             →  CLUSTER BY primary_supplier_key, category_name
+-- BridgeProductSupplier  →  CLUSTER BY supplier_key, product_sku
+```
+
+### Power BI VertiPaq Optimization
+
+- High-cardinality surrogate columns (`SalesLineKey`, `SnapshotKey`) excluded from the semantic model, reducing dictionary memory overhead by **~38%**.
+- Bi-directional relationships strictly minimized — all dimension → fact filter propagation is single-direction.
+- Incremental refresh configured on `FactInventorySnapshot` and `FactSales` for large historical table partitions.
+
+---
+
+## Orchestration
+
+The production ELT pipeline is managed by Apache Airflow 2.7+ and runs daily at **02:00 UTC**.
+
+**File:** [`orchestration/airflow/dags/dag_supply_chain_daily_elt.py`](orchestration/airflow/dags/dag_supply_chain_daily_elt.py)
+
+```
+pipeline_start
+      │
+      ▼
+check_gcs_raw_landing          ← GCSObjectsWithPrefixExistenceSensor (poke every 60s, timeout 30m)
+      │
+      ▼
+sync_bigquery_raw_tables       ← BigQueryInsertJobOperator  (refresh external table partition metadata)
+      │
+      ▼
+dbt_run_transformations        ← BashOperator  (dbt run --select staging intermediate marts)
+      │
+      ▼
+dbt_test_suite                 ← BashOperator  (dbt test  · 173 assertions)
+      │
+      ▼
+trigger_powerbi_refresh        ← SimpleHttpOperator  (Power BI REST API incremental refresh)
+      │
+      ▼
+pipeline_end
+```
+
+| DAG Property | Value |
+|:---|:---|
+| Schedule | `0 2 * * *` (daily 02:00 UTC) |
+| Max Active Runs | 1 |
+| Retries | 2 (5-min delay) |
+| Execution Timeout | 60 min per task |
+| End-to-End SLA | < 6.0 hours (actual: **9.6 min**) |
+| Failure Alerting | Email on failure (`email_on_failure: true`) |
+
+---
+
+## Dashboards
+
+The Power BI reporting suite delivers **9 purpose-built canvas pages** with role-filtered views via Dynamic RLS.
+
+| Page | Title | Key Metrics |
+|:---:|:---|:---|
+| 1 | **Executive Control Tower** | Inventory value, annual turns, service level, WAPE, working capital exposure |
+| 2 | **Inventory Health & Velocity** | DC-level storage density, aging brackets (0–30, 31–60, 61–90, 91–180, 180+ days) |
+| 3 | **SKU Optimization & Replenishment** | ABC-XYZ matrix, dynamic safety stock (King's formula), reorder point triggers |
+| 4 | **Supplier Performance & Sourcing** | Spend commitments, supplier OTIF, lead-time variance, Tier 1/2/3 risk exposure |
+| 5 | **Forecast Performance & Sensing** | WAPE trend, Holt-Winters baseline vs consensus forecast, SKU-level bias |
+| 6 | **Working Capital & Investment** | Inventory carrying cost (22% holding rate), excess stock, S&OP release roadmap |
+| 7 | **What-If Simulation Sandbox** | Interactive sliders: Demand growth, Lead-time shock, Service-level target, Carrying-cost rate |
+| 8 | **Planner Operational Workbench** | Daily action queue: emergency expediting, PO cancel/defer candidates (\$1.21B identified) |
+| 9 | **Pipeline Health & Governance** | BigQuery row volumes, dbt test assertion counts, Airflow DAG telemetry, last refresh timestamp |
+
+### King's Dynamic Safety Stock Formula
+
+Replenishment measures implement King's formula with **live sample standard deviations** (no hardcoded static ratios):
+
+$$SS = Z \times \sqrt{LT \cdot \sigma_D^2 + \bar{D}^2 \cdot \sigma_{LT}^2}$$
+
+- $\sigma_D$ — evaluated dynamically: `STDEVX.S(VALUES(DimDate[FullDate]), CALCULATE([Total Ordered Quantity]))`
+- $\sigma_{LT}$ — evaluated dynamically: `STDEV.S(FactPurchaseOrder[ActualLeadTimeDays])`
+- Graceful fallback guards applied for low-sample-size contexts
+
+---
+
+## Dynamic Row-Level Security
+
+Access is enforced at the semantic model layer using a **data-driven `SecurityUser` mapping table** and `USERPRINCIPALNAME()` — no email addresses are hardcoded in DAX expressions.
+
+| Role | Data Scope |
+|:---|:---|
+| **VP of Operations** | All 6 operating regions · All 100 fulfillment facilities |
+| **Regional Supply Planner** | Assigned geographic regions only |
+| **Warehouse Planner** | Assigned distribution centers only |
+| **Unauthorized Users** | Empty dataset — zero visual errors, no data leakage |
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+| Requirement | Version |
+|:---|:---|
+| Python | 3.12+ |
+| Git | 2.40+ |
+| Google Cloud SDK | Latest (optional, for BigQuery deployment) |
+| dbt Core | 1.8.0 (installed via `requirements.txt`) |
+
+### 1. Clone & Install
+
+```bash
 git clone https://github.com/Khprateek/Enterprise-Supply-Chain-Inventory-Optimization-Hub.git
 cd "Enterprise Supply Chain & Inventory Optimization Hub"
 
-# 2. Create and activate virtual environment
 python -m venv venv
-# Windows:
-.\venv\Scripts\activate
-# Linux/macOS:
+# Windows
+.\\venv\\Scripts\\activate
+# macOS / Linux
 source venv/bin/activate
 
-# 3. Install locked dependencies
 pip install -r requirements.txt
 ```
 
-### 4.3 Synthetic Data Engine Execution (Optional Regeneration)
-To regenerate or rescale the raw synthetic dataset:
+### 2. Generate the Synthetic Dataset (Optional — pre-built Parquet files included)
+
 ```bash
-# Execute orchestrator pipeline (default: dev scale, 731-day horizon, seed=42)
+# Default dev scale: 731-day horizon, seed=42
 python -m python.orchestrator --scale dev --output-dir data/raw --format parquet
 ```
-*Pipeline execution runs sequentially: Dimensions $\rightarrow$ Procurement $\rightarrow$ Sales (with SCD2 temporal lookup) $\rightarrow$ Movements $\rightarrow$ Inventory Snapshots (reconciled with transfers/scrap/damage) $\rightarrow$ Forecasts $\rightarrow$ Stockouts $\rightarrow$ Returns $\rightarrow$ Supplier Performance.*
 
-### 4.4 Data Validation Suite
-Run the automated test suite against the physical Parquet dataset in `data/raw/`:
+Pipeline execution sequence:
+`Dimensions → Procurement → Sales (SCD2 point-in-time) → Movements → Inventory Snapshots → Forecasts → Stockouts → Returns → Supplier Scorecard`
+
+### 3. Run the Raw Validation Suite
+
 ```bash
 python tests/validate_dataset.py
+# Expected: VALIDATION SUMMARY: 44 PASSED | 0 FAILED
 ```
-*Expected Output: `VALIDATION SUMMARY: 44 PASSED | 0 FAILED` (Validates PK uniqueness, FK referential integrity, non-negative stock balances, chronological constraints, and supplier scorecard consistency across all 9.55M rows).*
 
-### 4.5 dbt BigQuery Transformation & Snapshot Workflow
+### 4. Run the dbt Transformation Pipeline
+
 ```bash
 cd dbt
 
-# 1. Parse and validate DAG nodes and dependencies
+# Validate DAG structure and node dependencies
 dbt parse --profiles-dir .
 
-# 2. Execute SCD Type 2 product master snapshot
+# Execute SCD Type 2 product master snapshot
 dbt snapshot --profiles-dir .
 
-# 3. Build Staging views, Intermediate models, and Kimball Marts
+# Build staging views, intermediate models, and Kimball dimensional marts
 dbt run --profiles-dir .
 
-# 4. Execute automated schema and custom business rule tests
+# Run the full automated data quality test suite (173 assertions)
 dbt test --profiles-dir .
 ```
-*Model Architecture: `dim_product` is wired directly to `snap_dim_product_scd2`, and `fact_sales` performs a point-in-time join to link historical order dates to historical product surrogate keys and standard costs.*
 
-### 4.6 Airflow ELT Orchestration DAG
-The daily automated pipeline is defined in [`orchestration/airflow/dags/dag_supply_chain_daily_elt.py`](file:///d:/JOB/1.Buid_Skill/Work/Enterprise%20Supply%20Chain%20&%20Inventory%20Optimization%20Hub/orchestration/airflow/dags/dag_supply_chain_daily_elt.py):
-- **Schedule:** Daily at `02:00 UTC` (`0 2 * * *`).
-- **Execution DAG:**
-  `gcs_landing_sensor` $\rightarrow$ `stage_bigquery_tables` $\rightarrow$ `dbt_run_models` $\rightarrow$ `dbt_test_models` $\rightarrow$ `pbi_semantic_refresh`.
-- **SLA:** Fully completes within 9.6 minutes (well below the 6.0-hour business freshness SLA).
+### 5. Open the Power BI Semantic Model
+
+Open the `.pbix` file in **Power BI Desktop**, configure the BigQuery connection using your GCP service account credentials, and trigger a full dataset refresh.
 
 ---
 
-## 5. Power BI Semantic Model & Reporting Suite
+## Project Structure
 
-The reporting suite consists of 9 purpose-built canvas pages documented in `docs/powerbi/` and implemented with interactive HTML prototypes:
-
-1. **Page 1: Executive Control Tower** — Global inventory valuation, annual turnover, service level, WAPE.
-2. **Page 2: Inventory Health & Velocity** — DC-level storage density, excess inventory categorization.
-3. **Page 3: SKU Optimization & Replenishment** — King's dual-variance safety stock, dynamic Reorder Points (ROP).
-4. **Page 4: Supplier Performance & Sourcing** — Spend commitments, supplier OTIF compliance, lead-time variance.
-5. **Page 5: Forecast Performance & Sensing** — Monthly WAPE tracking, Holt-Winters baseline vs consensus forecast.
-6. **Page 6: Working Capital & Investment** — Holding cost structure (22%), 4,095-day Cash Conversion Cycle, S&OP release roadmap.
-7. **Page 7: What-If Simulation Sandbox** — Interactive parameter sliders (Demand, Lead Time, SLA, Holding Rate).
-8. **Page 8: Planner Operational Workbench** — Daily queues: emergency stockout expediting, $1.21B PO cancel/defer candidates.
-9. **Page 9: Pipeline Health & Governance** — BigQuery table volumes, dbt test assertions, orchestration telemetry.
-
-### 5.1 DAX Dynamic Variance in King's Formula
-Replenishment measures implement King's formula with dynamic sample standard deviations:
-$$SS = Z \times \sqrt{LT \cdot \sigma_D^2 + D^2 \cdot \sigma_{LT}^2}$$
-- $\sigma_D$: Evaluated dynamically using `STDEVX.S(VALUES(DimDate[FullDate]), CALCULATE([Total Ordered Quantity]))`.
-- $\sigma_{LT}$: Evaluated dynamically using `STDEV.S(FactPurchaseOrder[ActualLeadTimeDays])`.
-- Zero hardcoded static ratios; graceful fallback guards for low-sample contexts.
+```
+Enterprise Supply Chain & Inventory Optimization Hub/
+│
+├── data/
+│   ├── raw/                        # Immutable Parquet landing files (9.55M rows, 205 MB)
+│   └── staging/                    # Local staging intermediates
+│
+├── python/
+│   ├── orchestrator.py             # Master pipeline entrypoint
+│   ├── generate_dimensions.py      # Dimension master generation (regions, warehouses, SKUs, suppliers)
+│   ├── generate_procurement.py     # FactPurchaseOrder with realistic lead-time distributions
+│   ├── generate_sales.py           # FactSales with seasonality, channel mix, SCD2 price lookups
+│   ├── generate_inventory.py       # Stateful FactInventorySnapshot (daily balance continuity)
+│   ├── generate_movements.py       # FactInventoryMovement (inter-DC transfers, scrap, adjustments)
+│   ├── generate_forecast.py        # FactDemandForecast (Holt-Winters + consensus overlay)
+│   ├── generate_stockouts.py       # FactStockout (contiguous zero-stock event consolidation)
+│   ├── generate_returns.py         # FactCustomerReturns (reverse logistics with reason codes)
+│   ├── generate_supplier_perf.py   # FactSupplierMonthlyPerformance (OTIF scorecard)
+│   └── config.py                   # Centralized generation parameters and seeds
+│
+├── dbt/
+│   ├── models/
+│   │   ├── staging/                # 16 stg_* views (type-cast, deduplicate, normalize)
+│   │   ├── intermediate/           # 2 int_* aggregation and join models
+│   │   └── marts/
+│   │       ├── dimensions/         # 9 conformed dimension tables
+│   │       ├── facts/              # 7 partitioned & clustered fact tables
+│   │       └── scorecards/         # FactSupplierMonthlyPerformance materialized mart
+│   ├── snapshots/                  # snap_dim_product_scd2 (SCD Type 2)
+│   ├── tests/                      # Custom SQL business rule assertions
+│   ├── macros/                     # Reusable dbt macro utilities
+│   └── dbt_project.yml
+│
+├── orchestration/
+│   └── airflow/
+│       └── dags/
+│           └── dag_supply_chain_daily_elt.py   # Production daily ELT DAG
+│
+├── tests/
+│   └── validate_dataset.py         # 44-assertion raw Parquet validation suite
+│
+├── docs/
+│   ├── architecture/               # Architecture diagrams, data flow, performance benchmarks
+│   ├── data-model/                 # Dimensional model specifications and grain definitions
+│   ├── business/                   # KPI definitions, business rule documentation
+│   ├── powerbi/                    # DAX measure catalogue, RLS design, report walkthroughs
+│   ├── testing/                    # Test strategy, quality gate specifications
+│   └── decisions/                  # Architecture Decision Records (ADRs)
+│
+├── powerbi/                        # Power BI Desktop report files (.pbix)
+├── sql/                            # Standalone BigQuery DDL and diagnostic queries
+├── scripts/                        # Utility scripts (architecture diagram generation)
+├── requirements.txt                # Locked Python dependencies
+└── PROJECT_CONTEXT.md              # Full project specification and design rules
+```
 
 ---
 
-## 6. Dynamic Row-Level Security (RLS)
+## Key Analytics & KPIs
 
-Configured via the data-driven `SecurityUser` mapping table using `USERPRINCIPALNAME()` without hardcoded email addresses in DAX:
-- **VP of Operations:** Global visibility across all 100 fulfillment facilities and 6 operating regions.
-- **Regional Supply Planner:** Restricted strictly to distribution centers within assigned geographic regions.
-- **Warehouse Planner:** Restricted to specific assigned distribution center facilities.
-- **Unauthorized Users:** Receives empty datasets with zero visual errors.
+### Inventory
+
+| KPI | Definition |
+|:---|:---|
+| Days of Inventory (DOI) | `Avg On-Hand ÷ Avg Daily Demand` |
+| Inventory Turns | `Annual COGS ÷ Avg Inventory Value` |
+| Excess Inventory | Stock exceeding DOI threshold vs ABC-XYZ classification |
+| Stockout Rate | `Stockout Events ÷ Total SKU-Warehouse-Days` |
+
+### Demand Forecasting
+
+| KPI | Definition |
+|:---|:---|
+| WAPE | `Σ|Forecast − Actual| ÷ Σ Actual` (weighted, avoids small-volume distortion) |
+| Forecast Bias | `Σ(Forecast − Actual) ÷ Σ Actual` (positive = over-forecast) |
+
+### Procurement & Supply
+
+| KPI | Definition |
+|:---|:---|
+| Supplier OTIF | `On-Time In-Full lines ÷ Total PO lines` |
+| Lead-Time Variability | `StdDev(ActualLeadTimeDays)` per supplier |
+| PO Cycle Time | `ReceiptDate − POCreationDate` |
+
+### ABC-XYZ Segmentation
+
+| Class | Basis | Implication |
+|:---|:---|:---|
+| **A / B / C** | Contribution to annual consumption value | Priority tier for replenishment and working capital focus |
+| **X / Y / Z** | Coefficient of Variation of demand | Inventory policy selection (MTS / MTO / VMI) |
 
 ---
 
-## 7. Performance & Partition Pruning Benchmarks
+## Documentation
 
-- **Storage Engine Pruning:** Date-partitioned columnar storage achieves a **95.8% byte scan reduction** (13.7 MB scanned vs. 326.8 MB unpartitioned baseline).
-- **Scan Latency:** Query scan throughput accelerated from 1,230 ms to 31 ms (**39.7x speedup**).
-- **Semantic Optimization:** High-cardinality surrogate keys (`SalesLineKey`, `SnapshotKey`) excluded from the Power BI VertiPaq model, reducing dictionary memory overhead by **~38%**.
+| Document | Location |
+|:---|:---|
+| Architecture Overview | [`docs/architecture/architecture_overview.md`](docs/architecture/architecture_overview.md) |
+| End-to-End Data Flow | [`docs/architecture/data_flow.md`](docs/architecture/data_flow.md) |
+| BigQuery Setup & Security | [`docs/architecture/bigquery_setup_and_security.md`](docs/architecture/bigquery_setup_and_security.md) |
+| Performance & Partitioning | [`docs/architecture/warehouse_performance_and_optimization.md`](docs/architecture/warehouse_performance_and_optimization.md) |
+| Raw Layer Specification | [`docs/architecture/raw_layer_specification.md`](docs/architecture/raw_layer_specification.md) |
+| Environment Configuration | [`docs/architecture/environments.md`](docs/architecture/environments.md) |
+| Full Project Specification | [`PROJECT_CONTEXT.md`](PROJECT_CONTEXT.md) |
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
+---
+
+<div align="center">
+Built as a portfolio demonstration of enterprise data engineering, Kimball dimensional modelling, dbt transformation pipelines, and cloud BI architecture.
+</div>
