@@ -48,3 +48,16 @@ Desktop.ini
 .BIN/
 .DS_Store
 *.pbix
+
+# -- Phase 1: PySpark -------------------------------------------------------
+# BigQuery connector JAR (large binary — download via scripts/download_spark_jars.py)
+conf/spark/jars/*.jar
+
+# Spark event logs and checkpoint directories
+spark-warehouse/
+spark-events/
+checkpoints/
+
+# Local .env file with real credentials (NEVER commit)
+.env
+.env.local
