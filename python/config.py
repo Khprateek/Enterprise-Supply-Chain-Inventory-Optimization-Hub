@@ -56,7 +56,16 @@ FULL_CONFIG = ScaleConfig(
     forecast_horizons_months=12,  # ~600k forecast records
 )
 
-def get_config(scale_name: str) -> ScaleConfig:
+def get_config(scale_name: str, start_date_override=None, end_date_override=None) -> ScaleConfig:
+    import copy
     if scale_name.lower() == "full":
-        return FULL_CONFIG
-    return DEV_CONFIG
+        cfg = copy.deepcopy(FULL_CONFIG)
+    else:
+        cfg = copy.deepcopy(DEV_CONFIG)
+        
+    if start_date_override:
+        cfg.start_date = start_date_override
+    if end_date_override:
+        cfg.end_date = end_date_override
+        
+    return cfg

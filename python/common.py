@@ -16,10 +16,16 @@ def deterministic_hash(val: str, salt: int = 0) -> int:
     b = f"{val}_{salt}".encode('utf-8')
     return zlib.crc32(b) & 0x7FFFFFFF
 
-def save_dataframe(df: pd.DataFrame, entity_name: str, output_dir: str, format_type: str = "parquet"):
+def save_dataframe(df: pd.DataFrame, entity_name: str, output_dir: str, format_type: str = "parquet", append: bool = False):
     os.makedirs(output_dir, exist_ok=True)
     if format_type.lower() == "parquet":
         file_path = os.path.join(output_dir, f"{entity_name}.parquet")
+        
+        if append and os.path.exists(file_path):
+            existing_table = pq.read_table(file_path)
+            existing_df = existing_table.to_pandas()
+            df = pd.concat([existing_df, df], ignore_index=True)
+            
         table = pa.Table.from_pandas(df, preserve_index=False)
         pq.write_table(table, file_path, compression="snappy")
     else:

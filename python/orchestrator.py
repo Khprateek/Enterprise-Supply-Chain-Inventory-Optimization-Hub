@@ -18,20 +18,41 @@ from python.generate_stockouts import generate_stockouts
 from python.generate_returns import generate_returns
 from python.generate_supplier_perf import generate_supplier_performance
 
-def run_pipeline(scale_name: str = "dev", output_dir: str = "data/raw", format_type: str = "parquet", seed: int = 42):
+from python.incremental_state import get_incremental_start_date, get_max_keys, get_inventory_state, update_state
+from datetime import timedelta
+
+def run_pipeline(scale_name: str = "dev", output_dir: str = "data/raw", format_type: str = "parquet", seed: int = 42, incremental: bool = False, days: int = 1):
     start_time = time.time()
+    
+    # ── Handle Incremental Dates ─────────────────────────────────────────────
+    base_config = get_config(scale_name)
+    if incremental:
+        inc_start = get_incremental_start_date(scale_name, base_config.start_date)
+        inc_end = inc_start + timedelta(days=days - 1)
+        config = get_config(scale_name, start_date_override=inc_start, end_date_override=inc_end)
+        
+        start_slk, start_oc, start_sk = get_max_keys(scale_name)
+        prior_inv_state = get_inventory_state(scale_name)
+        mode_str = f"INCREMENTAL (Days: {days})"
+    else:
+        config = get_config(scale_name)
+        start_slk, start_oc, start_sk = 1, 10000, 1
+        prior_inv_state = {}
+        mode_str = "FULL BATCH"
+        
     print("=" * 80)
     print(f"ENTERPRISE SUPPLY CHAIN HUB: DATA GENERATION PIPELINE")
-    print(f"Scale: {scale_name.upper()} | Output: {output_dir} | Format: {format_type} | Seed: {seed}")
+    print(f"Scale: {scale_name.upper()} | Mode: {mode_str}")
+    print(f"Date Range: {config.start_date} to {config.end_date}")
+    print(f"Output: {output_dir} | Format: {format_type} | Seed: {seed}")
     print("=" * 80)
     
-    config = get_config(scale_name)
     if seed is not None:
         config.seed = seed
         
     rng = np.random.default_rng(config.seed)
     
-    # 1. Dimensions
+    # 1. Dimensions (Always full replace for simplicity in this simulation)
     t0 = time.time()
     dims = generate_dimensions(config, rng)
     print(f"  Dimensions generated in {time.time() - t0:.2f}s")
@@ -41,9 +62,12 @@ def run_pipeline(scale_name: str = "dev", output_dir: str = "data/raw", format_t
     df_po, active_pairs, dormant_pairs = generate_procurement(config, dims, rng)
     print(f"  Procurement generated in {time.time() - t0:.2f}s")
     
-    # 3. Sales (FactSales with multi-line orders and SCD2 resolution)
+    # 3. Sales (FactSales)
     t0 = time.time()
-    df_sales = generate_sales(config, dims, active_pairs, rng, dormant_pairs=dormant_pairs)
+    df_sales, next_slk, next_oc = generate_sales(
+        config, dims, active_pairs, rng, dormant_pairs=dormant_pairs, 
+        start_sales_line_key=start_slk, start_order_counter=start_oc
+    )
     print(f"  Sales generated in {time.time() - t0:.2f}s")
     
     # 4. Movements (FactInventoryMovement)
@@ -51,9 +75,12 @@ def run_pipeline(scale_name: str = "dev", output_dir: str = "data/raw", format_t
     df_movements = generate_movements(config, dims, active_pairs, rng)
     print(f"  Movements generated in {time.time() - t0:.2f}s")
     
-    # 5. Inventory (FactInventorySnapshot - reconciled with sales, PO receipts, and movements)
+    # 5. Inventory (FactInventorySnapshot)
     t0 = time.time()
-    df_inventory = generate_inventory(config, dims, df_sales, df_po, active_pairs, rng, df_movements=df_movements)
+    df_inventory, next_sk, final_inv_state = generate_inventory(
+        config, dims, df_sales, df_po, active_pairs, rng, df_movements=df_movements,
+        start_snapshot_key=start_sk, prior_state=prior_inv_state
+    )
     print(f"  Inventory snapshots generated in {time.time() - t0:.2f}s")
     
     # 6. Forecast (FactDemandForecast)
@@ -83,12 +110,12 @@ def run_pipeline(scale_name: str = "dev", output_dir: str = "data/raw", format_t
     
     manifest = []
     
-    # Dimensions
+    # Dimensions (always overwrite)
     for dim_name, df in dims.items():
-        p, count, size_mb = save_dataframe(df, dim_name, output_dir, format_type)
+        p, count, size_mb = save_dataframe(df, dim_name, output_dir, format_type, append=False)
         manifest.append({"Entity": dim_name, "Type": "Dimension" if "Dim" in dim_name else "Bridge", "Rows": count, "SizeMB": size_mb})
         
-    # Facts & Marts
+    # Facts & Marts (append if incremental)
     facts = [
         ("FactSales", df_sales),
         ("FactInventorySnapshot", df_inventory),
@@ -101,10 +128,17 @@ def run_pipeline(scale_name: str = "dev", output_dir: str = "data/raw", format_t
     ]
     
     for fact_name, df in facts:
-        p, count, size_mb = save_dataframe(df, fact_name, output_dir, format_type)
+        p, count, size_mb = save_dataframe(df, fact_name, output_dir, format_type, append=incremental)
         manifest.append({"Entity": fact_name, "Type": "Fact" if "Fact" in fact_name else "Mart", "Rows": count, "SizeMB": size_mb})
         
     df_manifest = pd.DataFrame(manifest)
+    
+    # Update State if successful
+    if incremental:
+        update_state(scale_name, config.end_date, next_slk, next_oc, next_sk, final_inv_state)
+    else:
+        # If running a full batch, reset the state to reflect the new baseline
+        update_state(scale_name, config.end_date, next_slk, next_oc, next_sk, final_inv_state)
     
     total_elapsed = time.time() - start_time
     total_fact_rows = sum([m["Rows"] for m in manifest if m["Type"] in ["Fact", "Mart"]])
@@ -114,9 +148,8 @@ def run_pipeline(scale_name: str = "dev", output_dir: str = "data/raw", format_t
     print("=" * 80)
     print(f"PIPELINE SUMMARY ({scale_name.upper()} SCALE)")
     print(f"Total Tables: {len(manifest)}")
-    print(f"Total Fact / Mart Rows: {total_fact_rows:,}")
-    print(f"Total All Rows: {total_all_rows:,}")
-    print(f"Total Storage Size: {total_size_mb:.2f} MB")
+    print(f"New Fact / Mart Rows: {total_fact_rows:,}")
+    print(f"New Total Rows: {total_all_rows:,}")
     print(f"Total Execution Time: {total_elapsed:.2f} seconds")
     print("=" * 80)
     
@@ -128,6 +161,9 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="data/raw", help="Output directory")
     parser.add_argument("--format", choices=["parquet", "csv"], default="parquet", help="Output file format")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument("--incremental", action="store_true", help="Run in incremental mode (append from last run date)")
+    parser.add_argument("--days", type=int, default=1, help="Number of days to generate in incremental mode")
     
     args = parser.parse_args()
-    run_pipeline(args.scale, args.output, args.format, args.seed)
+    run_pipeline(args.scale, args.output, args.format, args.seed, args.incremental, args.days)
+

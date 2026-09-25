@@ -23,6 +23,7 @@ def generate_sales(
     active_pairs: list,
     rng: np.random.Generator,
     dormant_pairs: set = None,
+    **kwargs
 ) -> pd.DataFrame:
     print("--- Generating Sales (FactSales) ---")
 
@@ -150,8 +151,8 @@ def generate_sales(
         "OrderLineCycleTimeDays", "OnTimeInFullFlag",
     ]}
 
-    sales_line_key = 1
-    order_counter  = 10_000
+    sales_line_key = kwargs.get("start_sales_line_key", 1)
+    order_counter  = kwargs.get("start_order_counter", 10_000)
     is_dormant_active = False
 
     for day_idx, current_date in enumerate(dates):
@@ -197,8 +198,8 @@ def generate_sales(
             # ── Sample SKUs: weighted with replacement (fast, statistically ─
             # equivalent to without-replacement for large pools vs small num_lines)
             sku_idxs = rng.choice(n_skus, size=num_lines * 2, p=sku_weights)
-            seen: set[int] = set()
-            chosen_sku_idxs: list[int] = []
+            seen = set()
+            chosen_sku_idxs = []
             for si in sku_idxs:
                 if si not in seen:
                     seen.add(si)
@@ -277,4 +278,4 @@ def generate_sales(
 
     df_sales = pd.DataFrame(all_cols)
     print(f"Generated {len(df_sales):,} sales order lines.")
-    return df_sales
+    return df_sales, sales_line_key, order_counter

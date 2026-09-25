@@ -5,9 +5,21 @@ from datetime import date, timedelta
 from python.config import ScaleConfig
 from python.common import date_to_key
 
-def generate_inventory(config: ScaleConfig, dimensions: dict, df_sales: pd.DataFrame, df_po: pd.DataFrame, active_pairs: list, rng: np.random.Generator, df_movements: pd.DataFrame = None):
+def generate_inventory(
+    config: ScaleConfig,
+    dimensions: dict,
+    df_sales: pd.DataFrame,
+    df_po: pd.DataFrame,
+    active_pairs: list,
+    rng: np.random.Generator,
+    df_movements: pd.DataFrame = None,
+    **kwargs
+):
     print("--- Generating Stateful Inventory Snapshots (FactInventorySnapshot) ---")
     
+    start_snapshot_key = kwargs.get("start_snapshot_key", 1)
+    prior_state = kwargs.get("prior_state", {})
+
     dim_product = dimensions["DimProduct"]
     curr_prods = dim_product[dim_product["IsCurrent"]].copy()
     sku_to_pk = dict(zip(curr_prods["ProductSKU"], curr_prods["ProductKey"]))
@@ -54,16 +66,21 @@ def generate_inventory(config: ScaleConfig, dimensions: dict, df_sales: pd.DataF
     dates = [config.start_date + timedelta(days=i) for i in range(total_days)]
     
     snapshot_records = []
-    snapshot_key = 1
+    snapshot_key = start_snapshot_key
     
     # Initialize state for each active pair
     for sku, wh_key in active_pairs:
         p_key = sku_to_pk[sku]
         unit_cost = sku_to_cost[sku]
         
-        # Initial starting inventory on day 0
-        curr_on_hand = int(rng.choice([1500, 3000, 5000, 8000]))
-        days_stagnant = int(rng.integers(0, 15))
+        pair_state = prior_state.get((sku, wh_key))
+        if pair_state:
+            curr_on_hand = pair_state["on_hand"]
+            days_stagnant = pair_state["days_stagnant"]
+        else:
+            # Initial starting inventory on day 0
+            curr_on_hand = int(rng.choice([1500, 3000, 5000, 8000]))
+            days_stagnant = int(rng.integers(0, 15))
         
         for cur_date in dates:
             # 1. Inbound receipts for today
@@ -114,6 +131,12 @@ def generate_inventory(config: ScaleConfig, dimensions: dict, df_sales: pd.DataF
             })
             snapshot_key += 1
             
+        # After completing all dates for this pair, save the final state
+        prior_state[(sku, wh_key)] = {
+            "on_hand": curr_on_hand,
+            "days_stagnant": days_stagnant
+        }
+            
     df_snapshot = pd.DataFrame(snapshot_records)
     print(f"Generated {len(df_snapshot):,} inventory snapshot rows.")
-    return df_snapshot
+    return df_snapshot, snapshot_key, prior_state
