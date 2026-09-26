@@ -61,23 +61,8 @@ if platform.system() == "Windows":
     # Prevent PySpark crash when project path has spaces or ampersands (&)
     # The & character breaks cmd.exe which PySpark uses internally on Windows.
     if " " in sys.executable or "&" in sys.executable:
-        # 8.3 paths are often disabled on non-C: drives, so we just use 'python'
-        # which safely resolves via the activated virtual environment's PATH.
         os.environ["PYSPARK_PYTHON"] = "python"
         os.environ["PYSPARK_DRIVER_PYTHON"] = "python"
-        
-    # Also force SPARK_HOME to short path to protect PySpark's internal scripts
-    # Also force SPARK_HOME to a safe path to protect PySpark's internal scripts
-    import tempfile
-    import subprocess
-    for sp in sys.path:
-        pyspark_dir = os.path.join(sp, "pyspark")
-        if os.path.exists(pyspark_dir) and os.path.exists(os.path.join(pyspark_dir, "bin")):
-            safe_spark_home = os.path.join(tempfile.gettempdir(), "safe_spark_home")
-            if not os.path.exists(safe_spark_home):
-                subprocess.run(["cmd.exe", "/c", "mklink", "/J", safe_spark_home, pyspark_dir], capture_output=True)
-            os.environ["SPARK_HOME"] = safe_spark_home
-            break
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
@@ -103,7 +88,7 @@ DEFAULT_STAGING_DIR = PROJECT_ROOT / "data" / "staging"
 DATASET_KEYS: Dict[str, Sequence[str]] = {
     "dim_date": ["date_key"],
     "dim_warehouse": ["warehouse_key"],
-    "dim_product": ["product_key"],
+    "dim_product": ["product_sku", "effective_from"],
     "dim_supplier": ["supplier_key"],
     "dim_customer_channel": ["customer_channel_key"],
     "dim_region": ["region_key"],
@@ -112,7 +97,7 @@ DATASET_KEYS: Dict[str, Sequence[str]] = {
     "security_user": ["user_key"],
     "bridge_product_supplier": ["product_sku", "supplier_key"],
     "fact_demand_forecast": ["forecast_key"],
-    "fact_purchase_order": ["po_line_key"],
+    "fact_purchase_order": ["poline_key"],
     "fact_sales": ["sales_line_key"],
     "fact_inventory_snapshot": ["snapshot_key"],
     "fact_inventory_movement": ["movement_key"],

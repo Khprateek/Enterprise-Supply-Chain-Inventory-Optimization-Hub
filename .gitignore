@@ -62,3 +62,9 @@ checkpoints/
 .env
 .env.local
 credentials/
+
+
+data/dimensions/*
+!data/dimensions/.gitkeep
+data/facts/*
+!data/facts/.gitkeep
