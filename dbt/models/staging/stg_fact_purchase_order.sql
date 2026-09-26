@@ -10,11 +10,11 @@ select
     cast(PromisedDeliveryDateKey as int64) as promised_delivery_date_key,
     cast(ActualDockReceiptDateKey as int64) as actual_dock_receipt_date_key,
     cast(SupplierKey as int64) as supplier_key,
-    trim(cast(SupplierCode as string)) as supplier_code,
+
     cast(ProductKey as int64) as product_key,
     trim(cast(ProductSKU as string)) as product_sku,
     cast(ReceivingWarehouseKey as int64) as receiving_warehouse_key,
-    trim(cast(WarehouseCode as string)) as warehouse_code,
+
     cast(BuyerEmployeeKey as int64) as buyer_employee_key,
     cast(OrderedQuantity as int64) as ordered_quantity,
     cast(ReceivedQuantity as int64) as received_quantity,

@@ -1,6 +1,6 @@
 -- Staging model for BridgeProductSupplier
 select
-    cast(BridgeKey as int64) as bridge_key,
+    farm_fingerprint(concat(cast(ProductSKU as string), '-', cast(SupplierKey as string))) as bridge_key,
     trim(cast(ProductSKU as string)) as product_sku,
     cast(SupplierKey as int64) as supplier_key,
     cast(IsPrimarySupplier as boolean) as is_primary_supplier,

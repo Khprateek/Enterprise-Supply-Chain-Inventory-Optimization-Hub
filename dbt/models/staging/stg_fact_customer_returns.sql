@@ -9,7 +9,7 @@ select
     cast(ProductKey as int64) as product_key,
     trim(cast(ProductSKU as string)) as product_sku,
     cast(ReceivingWarehouseKey as int64) as receiving_warehouse_key,
-    trim(cast(WarehouseCode as string)) as warehouse_code,
+
     cast(CustomerChannelKey as int64) as customer_channel_key,
     cast(ReturnedQuantity as int64) as returned_quantity,
     cast(RestockedQuantity as int64) as restocked_quantity,

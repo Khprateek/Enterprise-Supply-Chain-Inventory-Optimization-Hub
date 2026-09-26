@@ -8,7 +8,7 @@ select
     cast(ProductKey as int64) as product_key,
     trim(cast(ProductSKU as string)) as product_sku,
     cast(WarehouseKey as int64) as warehouse_key,
-    trim(cast(WarehouseCode as string)) as warehouse_code,
+
     cast(ScenarioKey as int64) as scenario_key,
     cast(ForecastedQuantity as int64) as forecasted_quantity,
     cast(BaselineStatisticalQuantity as int64) as baseline_statistical_quantity,

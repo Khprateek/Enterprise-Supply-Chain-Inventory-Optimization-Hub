@@ -61,3 +61,4 @@ checkpoints/
 # Local .env file with real credentials (NEVER commit)
 .env
 .env.local
+credentials/

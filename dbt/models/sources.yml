@@ -3,7 +3,7 @@ version: 2
 sources:
   - name: raw_supply_chain
     description: "Raw landing zone tables ingested directly from validated source Parquet files."
-    database: "{{ env_var('GCP_PROJECT_ID', 'supply-chain-analytics-hub') }}"
+    database: "{{ env_var('GCP_PROJECT_ID', 'smart-supply-and-inventory') }}"
     schema: "{{ env_var('GCP_RAW_SCHEMA', 'raw_supply_chain') }}"
     tables:
       - name: raw_dim_date
@@ -60,9 +60,6 @@ sources:
 
       - name: raw_bridge_product_supplier
         description: "Many-to-many sourcing authorization matrix between products and vendors."
-        columns:
-          - name: BridgeKey
-            tests: [unique, not_null]
 
       - name: raw_fact_sales
         description: "Transactional customer sales orders lines."

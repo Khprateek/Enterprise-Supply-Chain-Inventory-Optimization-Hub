@@ -12,9 +12,9 @@ select
     cast(ProductKey as int64) as product_key,
     trim(cast(ProductSKU as string)) as product_sku,
     cast(CustomerChannelKey as int64) as customer_channel_key,
-    trim(cast(CustomerChannelCode as string)) as customer_channel_code,
+
     cast(WarehouseKey as int64) as warehouse_key,
-    trim(cast(WarehouseCode as string)) as warehouse_code,
+
     cast(OrderedQuantity as int64) as ordered_quantity,
     cast(ShippedQuantity as int64) as shipped_quantity,
     cast(CancelledQuantity as int64) as cancelled_quantity,
